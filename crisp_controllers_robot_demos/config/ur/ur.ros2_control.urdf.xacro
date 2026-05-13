@@ -1,0 +1,85 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+<!--
+  ROS2 Control configuration for Universal Robots arm.
+  Parameters:
+    - name: Identifier for the hardware interface (typically the ur_type, e.g. ur5e)
+    - robot_ip: IP address of the real robot
+    - use_fake_hardware: true → mock_components/GenericSystem (effort commands)
+                         false → ur_robot_driver/URPositionHardwareInterface (position commands)
+    - tf_prefix: Optional prefix for all joint/link names (without trailing underscore)
+    - kinematics_parameters_file: Path to the robot calibration YAML
+-->
+<xacro:macro name="ur_arm_ros2_control"
+         params="name
+             robot_ip
+             use_fake_hardware
+             tf_prefix:=''
+             kinematics_parameters_file">
+
+    <xacro:property name="prefix" value="${tf_prefix + '_' if tf_prefix != '' else ''}"/>
+
+    <ros2_control name="${prefix}${name}HardwareInterface" type="system">
+      <hardware>
+        <xacro:unless value="${use_fake_hardware}">
+          <plugin>ur_robot_driver/URPositionHardwareInterface</plugin>
+          <param name="robot_ip">${robot_ip}</param>
+          <param name="tf_prefix">${prefix}</param>
+          <param name="kinematics_parameters_file">${kinematics_parameters_file}</param>
+          <param name="script_filename">$(find ur_robot_driver)/resources/ros_control.urscript</param>
+          <param name="output_recipe_filename">$(find ur_robot_driver)/resources/rtde_output_recipe.txt</param>
+          <param name="input_recipe_filename">$(find ur_robot_driver)/resources/rtde_input_recipe.txt</param>
+          <param name="headless_mode">false</param>
+          <param name="reverse_port">50001</param>
+          <param name="script_sender_port">50002</param>
+          <param name="trajectory_port">50003</param>
+          <param name="script_command_port">50004</param>
+          <param name="non_blocking_read">true</param>
+          <!-- Tool I/O communication parameters required by URPositionHardwareInterface.
+               stoi() is called on the integer ones; missing keys produce an empty
+               string that makes stoi("") throw std::invalid_argument. -->
+          <param name="use_tool_communication">false</param>
+          <param name="tool_voltage">0</param>
+          <param name="tool_parity">0</param>
+          <param name="tool_baud_rate">115200</param>
+          <param name="tool_stop_bits">1</param>
+          <param name="tool_rx_idle_chars">1.5</param>
+          <param name="tool_tx_idle_chars">3.5</param>
+          <param name="tool_device_name">/tmp/ttyUR</param>
+          <param name="tool_tcp_port">54321</param>
+        </xacro:unless>
+        <xacro:if value="${use_fake_hardware}">
+          <plugin>mock_components/GenericSystem</plugin>
+          <param name="mock_sensor_commands">true</param>
+          <param name="state_following_offset">0.0</param>
+        </xacro:if>
+      </hardware>
+
+      <xacro:macro name="configure_joint" params="joint_name initial_position">
+        <joint name="${joint_name}">
+          <xacro:unless value="${use_fake_hardware}">
+            <command_interface name="position"/>
+            <command_interface name="velocity"/>
+          </xacro:unless>
+
+          <command_interface name="effort"/>
+
+          <state_interface name="position">
+            <param name="initial_value">${initial_position}</param>
+          </state_interface>
+          <state_interface name="velocity"/>
+          <state_interface name="effort"/>
+        </joint>
+      </xacro:macro>
+
+      <xacro:configure_joint joint_name="${prefix}shoulder_pan_joint"  initial_position="0.0"/>
+      <xacro:configure_joint joint_name="${prefix}shoulder_lift_joint" initial_position="${-pi/2}"/>
+      <xacro:configure_joint joint_name="${prefix}elbow_joint"         initial_position="${pi/2}"/>
+      <xacro:configure_joint joint_name="${prefix}wrist_1_joint"       initial_position="${-pi/2}"/>
+      <xacro:configure_joint joint_name="${prefix}wrist_2_joint"       initial_position="0.0"/>
+      <xacro:configure_joint joint_name="${prefix}wrist_3_joint"       initial_position="0.0"/>
+
+    </ros2_control>
+  </xacro:macro>
+</robot>

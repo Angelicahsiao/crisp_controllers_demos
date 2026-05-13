@@ -117,23 +117,61 @@ RUN git clone https://github.com/ICube-Robotics/iiwa_ros2.git src/iiwa_ros2 \
     && touch src/iiwa_ros2/COLCON_IGNORE
 
 
+FROM base AS ur
 
-FROM franka AS franka-overlay
+# Create src/ as the ros user so that COPY and git clone in the overlay stage
+# have the correct ownership (other stages create src/ implicitly via git clone).
+RUN mkdir -p src
+
+# === UR ROS2 (via apt) ===
+# ros-$ROS_DISTRO-ur is the meta-package that pulls in:
+#   ur_robot_driver, ur_description, ur_controllers, ur_msgs, ur_client_library
+RUN sudo apt-get update && \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ros-$ROS_DISTRO-ur \
+    && sudo rm -rf /var/lib/apt/lists/*
+
+
+FROM ur AS ur-overlay
 
 ARG CRISP_CONTROLLERS_VERSION=1.1.0
 
 COPY . src/crisp_controllers_demos
 
+RUN git clone --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
+RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
+
+RUN source /opt/ros/$ROS_DISTRO/setup.bash \
+    && sudo apt update \
+    && rosdep update \
+    && rosdep install -q --from-paths src --ignore-src -y \
+        --skip-keys "robotiq_driver robotiq_description" \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py
+
+
+FROM franka AS franka-overlay
+
+ARG CRISP_CONTROLLERS_VERSION=1.1.0
+
+# COPY . src/crisp_controllers_demos
+
 RUN git clone  --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
 RUN git clone https://github.com/danielsanjosepro/franka_broadcasters.git src/franka_broadcasters
+RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
+RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
 
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && source /home/ros/ros2_ws/install/setup.bash \
     && sudo apt update \
+    && vcs import src < src/ros2_robotiq_gripper/ros2_robotiq_gripper.humble.repos --recursive --skip-existing \
     && rosdep update \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos franka_force_feedback_controllers
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver
 
 
 FROM kinova AS kinova-overlay
@@ -168,4 +206,3 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos
-

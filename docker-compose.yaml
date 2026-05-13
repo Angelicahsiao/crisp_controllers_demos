@@ -128,6 +128,16 @@ x-kinova-overlay: &kinova-overlay
       ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     target: kinova-overlay
 
+x-ur-overlay: &ur-overlay
+  <<: *base
+  image: crisp_controllers_demos:ur-overlay
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.robots
+    args:
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
+    target: ur-overlay
+
 x-franka: &franka
   <<: *base
   image: crisp_controllers_demos:franka
@@ -135,7 +145,7 @@ x-franka: &franka
     context: .
     dockerfile: docker/Dockerfile.robots
     args:
-      ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka
 
 x-franka-overlay: &franka-overlay
@@ -145,7 +155,7 @@ x-franka-overlay: &franka-overlay
     context: .
     dockerfile: docker/Dockerfile.robots
     args:
-      ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka-overlay
 
 
@@ -163,10 +173,13 @@ services:
   kinova-overlay:
     <<: *kinova-overlay
 
+  ur-overlay:
+    <<: *ur-overlay
+
   launch_zenoh_router:
     <<: *base
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       export RMW_IMPLEMENTATION=rmw_zenoh_cpp &&
       export RUST_LOG=zenoh=info &&
       ros2 doctor -r | grep rmw_zenoh_cpp &&
@@ -177,7 +190,7 @@ services:
   launch_franka:
     <<: *franka-overlay
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
@@ -187,7 +200,7 @@ services:
   launch_dual_franka:
     <<: *franka-overlay
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
@@ -195,10 +208,28 @@ services:
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
       left_robot_ip:=${LEFT_ROBOT_IP:-172.16.1.2} right_robot_ip:=${RIGHT_ROBOT_IP:-172.16.0.2}"
 
+  launch_ur:
+    <<: *ur-overlay
+    container_name: crisp_controllers_demos_launch_ur
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash &&
+      source install/setup.bash &&
+      cd ~/ros2_ws &&
+      ls src &&
+      colcon build --symlink-install &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos ur.launch.py
+      ur_type:=${UR_TYPE:-ur5e}
+      use_fake_hardware:=${UR_FAKE_HARDWARE:-false}
+      robot_ip:=${ROBOT_IP:-192.168.0.10}
+      use_rviz:=true"
+
   launch_kinova:
     <<: *kinova-overlay
     command: >
-      bash -c "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -c "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
