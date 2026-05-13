@@ -6,8 +6,8 @@
   Parameters:
     - name: Identifier for the hardware interface (typically the ur_type, e.g. ur5e)
     - robot_ip: IP address of the real robot
-    - use_fake_hardware: true → mock_components/GenericSystem (effort commands)
-                         false → ur_robot_driver/URPositionHardwareInterface (position commands)
+    - use_fake_hardware: true → mock_components/GenericSystem (position/velocity/effort commands)
+                         false → ur_robot_driver/URPositionHardwareInterface (position/velocity commands)
     - tf_prefix: Optional prefix for all joint/link names (without trailing underscore)
     - kinematics_parameters_file: Path to the robot calibration YAML
 -->
@@ -58,12 +58,13 @@
 
       <xacro:macro name="configure_joint" params="joint_name initial_position">
         <joint name="${joint_name}">
-          <xacro:unless value="${use_fake_hardware}">
-            <command_interface name="position"/>
-            <command_interface name="velocity"/>
-          </xacro:unless>
-
-          <command_interface name="effort"/>
+          <command_interface name="position"/>
+          <command_interface name="velocity"/>
+          <!-- effort command is only available with fake hardware (mock_components/GenericSystem).
+               URPositionHardwareInterface does not export an effort command interface. -->
+          <xacro:if value="${use_fake_hardware}">
+            <command_interface name="effort"/>
+          </xacro:if>
 
           <state_interface name="position">
             <param name="initial_value">${initial_position}</param>
