@@ -6,10 +6,15 @@
   Parameters:
     - name: Identifier for the hardware interface (typically the ur_type, e.g. ur5e)
     - robot_ip: IP address of the real robot
-    - use_fake_hardware: true → mock_components/GenericSystem (position/velocity/effort commands)
-                         false → ur_robot_driver/URPositionHardwareInterface (position/velocity commands)
+    - use_fake_hardware: true  → mock_components/GenericSystem
+                         false → ur_robot_driver/URPositionHardwareInterface
     - tf_prefix: Optional prefix for all joint/link names (without trailing underscore)
     - kinematics_parameters_file: Path to the robot calibration YAML
+
+  Effort (torque) command interface:
+    Supported on PolyScope X >= 10.12.1 via URScript direct_torque().
+    The driver exports the effort interface only when declared here.
+    Robot gravity compensation is applied automatically by the firmware.
 -->
 <xacro:macro name="ur_arm_ros2_control"
          params="name
@@ -60,11 +65,7 @@
         <joint name="${joint_name}">
           <command_interface name="position"/>
           <command_interface name="velocity"/>
-          <!-- effort command is only available with fake hardware (mock_components/GenericSystem).
-               URPositionHardwareInterface does not export an effort command interface. -->
-          <xacro:if value="${use_fake_hardware}">
-            <command_interface name="effort"/>
-          </xacro:if>
+          <command_interface name="effort"/>
 
           <state_interface name="position">
             <param name="initial_value">${initial_position}</param>
