@@ -1,11 +1,10 @@
-# Real hardware controller config.
-# use_gravity_compensation is false because UR firmware's direct_torque()
-# applies gravity compensation automatically — enabling it here too would
-# double-count gravity and destabilize the robot.
+# Fake hardware controller config (mock_components/GenericSystem).
+# use_gravity_compensation is true so torque output is physically
+# meaningful if a physics simulator is swapped in for mock_components.
 /**:
   controller_manager:
     ros__parameters:
-      update_rate: 500  # Hz — matches UR RTDE cycle
+      update_rate: 500  # Hz
 
       joint_trajectory_controller:
         type: joint_trajectory_controller/JointTrajectoryController
@@ -97,7 +96,7 @@
       use_friction: true
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: false
+      use_gravity_compensation: true
 
   joint_impedance_controller:
     ros__parameters:
@@ -138,7 +137,7 @@
       use_friction: true
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: false
+      use_gravity_compensation: true
       limit_error: true
       limit_torques: true
 
@@ -173,4 +172,4 @@
       use_friction: false
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: false
+      use_gravity_compensation: true
