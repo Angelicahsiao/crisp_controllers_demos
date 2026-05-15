@@ -128,6 +128,9 @@ x-kinova-overlay: &kinova-overlay
       ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     target: kinova-overlay
 
+# UR and Franka pin to Humble at both build- and run-time. The runtime
+# environment block is redefined (YAML merge does not deep-merge env maps)
+# so /ros_entrypoint.sh sources /opt/ros/humble/setup.bash on container start.
 x-ur-overlay: &ur-overlay
   <<: *base
   image: crisp_controllers_demos:ur-overlay
@@ -137,6 +140,16 @@ x-ur-overlay: &ur-overlay
     args:
       ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: ur-overlay
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-fastdds}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 x-franka: &franka
   <<: *base
@@ -147,6 +160,16 @@ x-franka: &franka
     args:
       ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-fastdds}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 x-franka-overlay: &franka-overlay
   <<: *base
@@ -157,6 +180,16 @@ x-franka-overlay: &franka-overlay
     args:
       ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka-overlay
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-fastdds}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 
 services:
