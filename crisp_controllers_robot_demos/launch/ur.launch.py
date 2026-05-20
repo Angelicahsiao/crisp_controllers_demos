@@ -60,8 +60,8 @@ def robot_description_dependent_nodes_spawner(
             condition=IfCondition(start_robot_state_publisher),
         ),
         Node(
-            package="controller_manager",
-            executable="ros2_control_node",
+            package="ur_robot_driver",
+            executable="ur_ros2_control_node",
             parameters=[
                 ur_controllers,
                 {"robot_description": robot_description},

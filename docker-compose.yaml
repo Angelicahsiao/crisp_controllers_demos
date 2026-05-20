@@ -25,7 +25,7 @@ x-cameras-base: &cameras-base
   environment:
     - QT_X11_NO_MITSHM=1
     - DISPLAY=$DISPLAY
-    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-100}
+    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
     - RCUTILS_COLORIZED_OUTPUT=1
     - SHELL=/bin/bash
     - CAMERA_NAME=camera
@@ -85,6 +85,7 @@ x-base: &base
     - $HOME/.Xauthority:/root/.Xauthority
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
     - /dev:/dev
+    - ../crisp_py:/home/ros/ros2_ws/src/crisp_py
   device_cgroup_rules:
     - 'c 81:* rmw'
     - 'c 189:* rmw'
@@ -95,7 +96,7 @@ x-base: &base
   environment:
     QT_X11_NO_MITSHM: 1
     DISPLAY: ${DISPLAY}
-    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
     RMW: ${RMW:-fastdds}
@@ -143,13 +144,15 @@ x-ur-overlay: &ur-overlay
   environment:
     QT_X11_NO_MITSHM: 1
     DISPLAY: ${DISPLAY}
-    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
-    RMW: ${RMW:-fastdds}
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
     ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
     ROS_DISTRO: ${ROS_DISTRO:-humble}
-    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
+    PYTHONPATH: /home/ros/ros2_ws/src/crisp_py
 
 x-franka: &franka
   <<: *base
@@ -163,7 +166,7 @@ x-franka: &franka
   environment:
     QT_X11_NO_MITSHM: 1
     DISPLAY: ${DISPLAY}
-    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
     RMW: ${RMW:-fastdds}
@@ -183,7 +186,7 @@ x-franka-overlay: &franka-overlay
   environment:
     QT_X11_NO_MITSHM: 1
     DISPLAY: ${DISPLAY}
-    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
     RMW: ${RMW:-fastdds}
@@ -246,10 +249,7 @@ services:
     container_name: crisp_controllers_demos_launch_ur
     command: >
       bash -lc "source /opt/ros/humble/setup.bash &&
-      source install/setup.bash &&
       cd ~/ros2_ws &&
-      ls src &&
-      colcon build --symlink-install &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
       RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
