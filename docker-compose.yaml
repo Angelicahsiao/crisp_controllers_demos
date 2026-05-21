@@ -85,6 +85,7 @@ x-base: &base
     - $HOME/.Xauthority:/root/.Xauthority
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
     - /dev:/dev
+    - .:/home/ros/ros2_ws/src/crisp_controllers_demos
     - ../crisp_py:/home/ros/ros2_ws/src/crisp_py
   device_cgroup_rules:
     - 'c 81:* rmw'
@@ -250,6 +251,7 @@ services:
     command: >
       bash -lc "source /opt/ros/humble/setup.bash &&
       cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
       RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&

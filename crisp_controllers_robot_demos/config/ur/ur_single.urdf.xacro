@@ -14,6 +14,8 @@
     default="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
   <xacro:arg name="input_recipe_filename"
     default="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"/>
+  <xacro:arg name="kinematics_parameters_file"
+    default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
 
   <xacro:property name="ur_type_val"   value="${xacro.arg('ur_type')}"/>
   <xacro:property name="tf_prefix_val" value="${xacro.arg('tf_prefix')}"/>
@@ -25,7 +27,7 @@
     tf_prefix="${tf_prefix_val}"
     parent="world"
     joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
-    kinematics_parameters_file="$(find ur_description)/config/${ur_type_val}/default_kinematics.yaml"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"
     physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
     visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
     robot_ip="$(arg robot_ip)"

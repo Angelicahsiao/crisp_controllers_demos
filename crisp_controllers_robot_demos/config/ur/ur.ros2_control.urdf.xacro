@@ -32,7 +32,7 @@
           <param name="robot_ip">${robot_ip}</param>
           <param name="tf_prefix">${prefix}</param>
           <param name="kinematics_parameters_file">${kinematics_parameters_file}</param>
-          <param name="script_filename">$(find ur_robot_driver)/resources/ros_control.urscript</param>
+          <param name="script_filename">$(find crisp_controllers_robot_demos)/config/ur/ros_control.urscript</param>
           <param name="output_recipe_filename">$(find ur_robot_driver)/resources/rtde_output_recipe.txt</param>
           <param name="input_recipe_filename">$(find ur_robot_driver)/resources/rtde_input_recipe.txt</param>
           <param name="headless_mode">false</param>

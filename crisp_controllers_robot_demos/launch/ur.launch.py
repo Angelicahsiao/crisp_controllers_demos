@@ -23,12 +23,15 @@ def robot_description_dependent_nodes_spawner(
     use_fake_hardware_str = context.perform_substitution(use_fake_hardware)
     tf_prefix_str = context.perform_substitution(tf_prefix)
 
-    ur_xacro_filepath = os.path.join(
-        get_package_share_directory("crisp_controllers_robot_demos"),
-        "config",
-        "ur",
-        "ur_single.urdf.xacro",
+    pkg_share = get_package_share_directory("crisp_controllers_robot_demos")
+    calibration_file = os.path.join(pkg_share, "config", "ur", f"{ur_type_str}_calibration.yaml")
+    default_kinematics = os.path.join(
+        get_package_share_directory("ur_description"),
+        "config", ur_type_str, "default_kinematics.yaml",
     )
+    kinematics_file = calibration_file if os.path.exists(calibration_file) else default_kinematics
+
+    ur_xacro_filepath = os.path.join(pkg_share, "config", "ur", "ur_single.urdf.xacro")
     robot_description = xacro.process_file(
         ur_xacro_filepath,
         mappings={
@@ -36,6 +39,7 @@ def robot_description_dependent_nodes_spawner(
             "robot_ip": robot_ip_str,
             "use_fake_hardware": use_fake_hardware_str,
             "tf_prefix": tf_prefix_str,
+            "kinematics_parameters_file": kinematics_file,
         },
     ).toprettyxml(indent="  ")
 
