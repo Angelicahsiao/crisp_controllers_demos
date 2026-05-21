@@ -28,6 +28,9 @@
       joint_impedance_controller:
         type: crisp_controllers/CartesianController
 
+      freedrive_mode_controller:
+        type: ur_controllers/FreedriveModeController
+
   joint_trajectory_controller:
     ros__parameters:
       command_interfaces:
@@ -87,9 +90,9 @@
         k_pos_x: 0.0
         k_pos_y: 0.0
         k_pos_z: 0.0
-        k_rot_x: 30.0
-        k_rot_y: 30.0
-        k_rot_z: 30.0
+        k_rot_x: 0.0
+        k_rot_y: 0.0
+        k_rot_z: 0.0
 
       nullspace:
         stiffness: 0.0
@@ -160,12 +163,12 @@
         output_torque: 0.5
 
       task:
-        k_pos_x: 400.0
-        k_pos_y: 400.0
-        k_pos_z: 400.0
-        k_rot_x: 30.0
-        k_rot_y: 30.0
-        k_rot_z: 30.0
+        k_pos_x: 200.0
+        k_pos_y: 200.0
+        k_pos_z: 200.0
+        k_rot_x: 10.0
+        k_rot_y: 10.0
+        k_rot_z: 10.0
 
       nullspace:
         stiffness: 2.0
@@ -174,3 +177,7 @@
       use_coriolis_compensation: true
       use_local_jacobian: true
       use_gravity_compensation: false
+
+  freedrive_mode_controller:
+    ros__parameters:
+      async_wait_for_acknowledgment: true
