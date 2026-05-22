@@ -141,6 +141,7 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
         https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git \
     && cd /tmp/ur_src \
     && sudo apt-get update -qq \
+    && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y \
     && colcon build --packages-select ur_robot_driver \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
