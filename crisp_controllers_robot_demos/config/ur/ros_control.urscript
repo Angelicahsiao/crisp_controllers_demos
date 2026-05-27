@@ -116,6 +116,28 @@ end
 
 # HEADER_END
 
+# Torque control additions - defined outside the header block so they
+# survive even if ScriptBuilder replaces the entire HEADER_BEGIN/HEADER_END
+# section with the system header (which lacks torque support).
+MODE_TORQUE = 8
+global cmd_torque = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+def set_torque(tau):
+  cmd_torque = tau
+end
+
+thread torqueThread():
+  textmsg("ExternalControl: Starting torque thread")
+  while control_mode == MODE_TORQUE:
+    enter_critical
+    tau = cmd_torque
+    direct_torque(tau)
+    exit_critical
+  end
+  textmsg("ExternalControl: torque thread ended")
+  stopj(4.0)
+end
+
 # NODE_CONTROL_LOOP_BEGINS
 
 socket_open("{{SERVER_IP_REPLACE}}", {{SERVER_PORT_REPLACE}}, "reverse_socket")
