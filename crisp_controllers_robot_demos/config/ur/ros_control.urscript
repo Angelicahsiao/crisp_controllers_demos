@@ -17,6 +17,7 @@ MODE_UNINITIALIZED = -1
 MODE_IDLE = 0
 MODE_SERVOJ = 1
 MODE_SPEEDJ = 2
+MODE_TORQUE = 8
 
 #Global variables are also showed in the Teach pendants variable list
 global cmd_servo_state = SERVO_UNINITIALIZED
@@ -26,6 +27,7 @@ global cmd_servo_q_last = get_actual_joint_positions()
 global extrapolate_count = 0
 global extrapolate_max_count = 0
 global control_mode = MODE_UNINITIALIZED
+global cmd_torque = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 cmd_speedj_active = True
 
 def set_servo_setpoint(q):
@@ -93,6 +95,23 @@ thread speedThread():
   end
   textmsg("ExternalControl: speedj thread ended")
   stopj(5.0)
+end
+
+# Helpers for torque control
+def set_torque(tau):
+  cmd_torque = tau
+end
+
+thread torqueThread():
+  textmsg("ExternalControl: Starting torque thread")
+  while control_mode == MODE_TORQUE:
+    enter_critical
+    tau = cmd_torque
+    direct_torque(tau)
+    exit_critical
+  end
+  textmsg("ExternalControl: torque thread ended")
+  stopj(4.0)
 end
 
 # HEADER_END
