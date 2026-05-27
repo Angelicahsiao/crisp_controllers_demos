@@ -141,7 +141,7 @@
       use_friction: false
       use_coriolis_compensation: false
       use_local_jacobian: true
-      use_gravity_compensation: false
+      use_gravity_compensation: true
       limit_error: true
       limit_torques: true
 
