@@ -7,6 +7,12 @@
   <xacro:arg name="robot_ip"            default="192.168.56.101"/>
   <xacro:arg name="use_fake_hardware"   default="false"/>
   <xacro:arg name="tf_prefix"           default=""/>
+  <!-- headless_mode=true bypasses URCapX ScriptBuilder entirely.
+       The driver pushes external_control.urscript directly over port 30001.
+       Required for torque control when URCapX ExternalControl < 1.2.0
+       (older versions generate their own program loop that omits MODE_TORQUE).
+       Prerequisite: pendant must be in Remote Control mode. -->
+  <xacro:arg name="headless_mode"       default="true"/>
 
   <xacro:arg name="script_filename"
     default="$(find ur_client_library)/resources/external_control.urscript"/>
@@ -32,6 +38,7 @@
     visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
     robot_ip="$(arg robot_ip)"
     use_fake_hardware="$(arg use_fake_hardware)"
+    headless_mode="$(arg headless_mode)"
     script_filename="$(arg script_filename)"
     output_recipe_filename="$(arg output_recipe_filename)"
     input_recipe_filename="$(arg input_recipe_filename)"

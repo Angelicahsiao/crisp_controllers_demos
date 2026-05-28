@@ -16,12 +16,14 @@ def robot_description_dependent_nodes_spawner(
     robot_ip,
     use_fake_hardware,
     tf_prefix,
+    headless_mode,
     start_robot_state_publisher,
 ):
     ur_type_str = context.perform_substitution(ur_type)
     robot_ip_str = context.perform_substitution(robot_ip)
     use_fake_hardware_str = context.perform_substitution(use_fake_hardware)
     tf_prefix_str = context.perform_substitution(tf_prefix)
+    headless_mode_str = context.perform_substitution(headless_mode)
 
     pkg_share = get_package_share_directory("crisp_controllers_robot_demos")
     calibration_file = os.path.join(pkg_share, "config", "ur", f"{ur_type_str}_calibration.yaml")
@@ -39,6 +41,7 @@ def robot_description_dependent_nodes_spawner(
             "robot_ip": robot_ip_str,
             "use_fake_hardware": use_fake_hardware_str,
             "tf_prefix": tf_prefix_str,
+            "headless_mode": headless_mode_str,
             "kinematics_parameters_file": kinematics_file,
         },
     ).toprettyxml(indent="  ")
@@ -84,6 +87,7 @@ def generate_launch_description():
     robot_ip = LaunchConfiguration("robot_ip")
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     tf_prefix = LaunchConfiguration("tf_prefix")
+    headless_mode = LaunchConfiguration("headless_mode")
     use_rviz = LaunchConfiguration("use_rviz")
     start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
 
@@ -100,6 +104,7 @@ def generate_launch_description():
             robot_ip,
             use_fake_hardware,
             tf_prefix,
+            headless_mode,
             start_robot_state_publisher,
         ],
     )
@@ -125,6 +130,16 @@ def generate_launch_description():
                 "tf_prefix",
                 default_value="",
                 description="Prefix applied to all joint and link names (without trailing underscore).",
+            ),
+            DeclareLaunchArgument(
+                "headless_mode",
+                default_value="true",
+                description=(
+                    "Send URScript directly to port 30001 (headless), bypassing URCapX ScriptBuilder. "
+                    "Required for torque control with URCapX ExternalControl < 1.2.0, which generates "
+                    "its own program loop and omits MODE_TORQUE dispatch. "
+                    "Prerequisite: pendant must be in Remote Control mode."
+                ),
             ),
             DeclareLaunchArgument(
                 "use_rviz",
