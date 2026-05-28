@@ -143,6 +143,7 @@
           wrist_1_joint.value:        15.0  # lower weight → less torque → less wrist oscillation
           wrist_2_joint.value:        15.0
           wrist_3_joint.value:        15.0
+      use_operational_space: false
       use_friction: false
       use_coriolis_compensation: false
       use_local_jacobian: true
@@ -177,6 +178,7 @@
       nullspace:
         stiffness: 0.0
         damping: 0.0
+      use_operational_space: true
       use_friction: false
       use_coriolis_compensation: true
       use_local_jacobian: true
