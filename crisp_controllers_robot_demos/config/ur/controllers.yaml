@@ -131,9 +131,9 @@
         output_torque: 0.3    # output smoothing — prevents torque chatter
       max_delta_tau: 2.0      # larger rate limit avoids phase lag from excessive clamping
       nullspace:
-        stiffness: 25.0       # critical-damped at 25: d=2*sqrt(25)=10
+        stiffness: 10.0
         projector_type: none
-        damping: 10.0         # 2*sqrt(25); critical damping
+        damping: 20.0
         max_tau: 450.0
         regularization: 1.0e-06
         weights:
