@@ -106,6 +106,8 @@
 
   # Joint-space impedance: nullspace posture control only, no Cartesian task stiffness.
   # Gains scaled from UR16e by joint torque limits (150 Nm shoulder / 28 Nm wrist vs 270/54).
+  # filter.dq and filter.output_torque are the primary knobs for wrist oscillation:
+  #   lower alpha = more smoothing (0.1 = strong, 1.0 = no filter).
   joint_impedance_controller:
     ros__parameters:
       joints:
@@ -124,18 +126,21 @@
         k_rot_x: 0.0
         k_rot_y: 0.0
         k_rot_z: 0.0
-      max_delta_tau: 0.5
+      filter:
+        dq: 0.1               # strong velocity smoothing — suppresses damping-term noise
+        output_torque: 0.2    # strong output smoothing — prevents torque chatter at wrists
+      max_delta_tau: 2.0      # was 0.5; too-small rate limit adds phase lag → instability
       nullspace:
-        stiffness: 35.0       # UR16e: 90 → scaled by ~0.55 payload ratio
+        stiffness: 10.0       # reduced from 35 — lower natural freq avoids delay-driven oscillation
         projector_type: none
-        damping: 13.0         # UR16e: 35 → scaled proportionally
-        max_tau: 450.0        # UR16e: 1200 → total UR7e torque budget ~650 Nm, use 450
+        damping: 6.5          # ≈ 2*sqrt(10); critical damping at new stiffness
+        max_tau: 450.0
         regularization: 1.0e-06
         weights:
-          shoulder_pan_joint.value:  150.0   # limit 150 Nm (UR16e: ~270 Nm → 300)
+          shoulder_pan_joint.value:  150.0
           shoulder_lift_joint.value: 150.0
           elbow_joint.value:         150.0
-          wrist_1_joint.value:        28.0   # limit 28 Nm (UR16e: ~54 Nm → 300, so scale: 28/54*300 ≈ 155, cap at 28)
+          wrist_1_joint.value:        28.0
           wrist_2_joint.value:        28.0
           wrist_3_joint.value:        28.0
       use_friction: false
