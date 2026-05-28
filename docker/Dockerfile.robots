@@ -131,24 +131,31 @@ RUN sudo apt-get update && \
     ros-$ROS_DISTRO-ur \
     && sudo rm -rf /var/lib/apt/lists/*
 
-# === Override ur_robot_driver with source build for torque control support ===
-# The apt-installed version does not properly set torque_controller_running_ in
-# perform_command_mode_switch when effort interfaces are claimed. Building from
-# the latest branch source fixes this, enabling MODE_TORQUE over the reverse socket.
+# === Override ur_robot_driver + ur_client_library with source builds ===
+# Root cause: apt liburcl 2.11.0 does not export
+#   writeJointCommand(array<double,6>, ControlMode, RobotReceiveTimeout)
+# which the current driver plugin calls for MODE_TORQUE=8. Without the correct
+# symbol the write silently fails and the robot never enters torque mode.
+# Building both packages from source gives us a liburcl that implements the full
+# ControlMode-aware API needed for direct_torque() over the reverse socket.
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && mkdir -p /tmp/ur_src/src && cd /tmp/ur_src/src \
     && git clone --depth 1 -b $ROS_DISTRO \
         https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git \
+    && git clone --depth 1 \
+        https://github.com/UniversalRobots/Universal_Robots_Client_Library.git \
     && cd /tmp/ur_src \
     && sudo apt-get update -qq \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y \
-    && colcon build --packages-select ur_robot_driver \
+    && colcon build --packages-select ur_client_library ur_robot_driver \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
     && sudo cp install/ur_robot_driver/lib/libur_robot_driver_plugin.so \
         /opt/ros/$ROS_DISTRO/lib/libur_robot_driver_plugin.so \
     && sudo cp -r install/ur_robot_driver/share/ur_robot_driver/resources/. \
         /opt/ros/$ROS_DISTRO/share/ur_robot_driver/resources/ \
+    && sudo find install/ur_client_library/lib -name "liburcl*" \
+        -exec cp -P {} /opt/ros/$ROS_DISTRO/lib/x86_64-linux-gnu/ \; \
     && cd / && sudo rm -rf /tmp/ur_src \
     && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
