@@ -131,9 +131,9 @@
         output_torque: 0.3
       max_delta_tau: 0.5
       nullspace:
-        stiffness: 90.0
+        stiffness: 55.0
         projector_type: none
-        damping: 35.0
+        damping: 21.0
         max_tau: 450.0
         regularization: 1.0e-06
         weights:
