@@ -165,6 +165,12 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
         /opt/ros/$ROS_DISTRO/share/ur_robot_driver/resources/ \
     && sudo find install/ur_client_library/lib -name "liburcl*" \
         -exec cp -P {} /opt/ros/$ROS_DISTRO/lib/x86_64-linux-gnu/ \; \
+    && sudo mkdir -p /opt/ros/$ROS_DISTRO/share/ur_client_library/resources \
+    && sudo cp install/ur_client_library/share/ur_client_library/resources/external_control.urscript \
+        /opt/ros/$ROS_DISTRO/share/ur_client_library/resources/external_control.urscript \
+    && grep -q "MODE_TORQUE = 8" \
+        /opt/ros/$ROS_DISTRO/share/ur_client_library/resources/external_control.urscript \
+        || (echo "ERROR: rebuilt external_control.urscript is missing MODE_TORQUE" && exit 1) \
     && cd / && sudo rm -rf /tmp/ur_src \
     && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
