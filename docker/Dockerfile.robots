@@ -157,7 +157,7 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt-get update -qq \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y \
-    && colcon build --packages-select ur_client_library ur_robot_driver \
+    && colcon build --packages-select ur_client_library ur_robot_driver ur_calibration \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
     && sudo cp install/ur_robot_driver/lib/libur_robot_driver_plugin.so \
         /opt/ros/$ROS_DISTRO/lib/libur_robot_driver_plugin.so \
@@ -171,6 +171,10 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && grep -q "MODE_TORQUE = 8" \
         /opt/ros/$ROS_DISTRO/share/ur_client_library/resources/external_control.urscript \
         || (echo "ERROR: rebuilt external_control.urscript is missing MODE_TORQUE" && exit 1) \
+    && sudo cp install/ur_calibration/lib/ur_calibration/calibration_correction \
+        /opt/ros/$ROS_DISTRO/lib/ur_calibration/calibration_correction \
+    && sudo cp -r install/ur_calibration/share/ur_calibration/. \
+        /opt/ros/$ROS_DISTRO/share/ur_calibration/ \
     && cd / && sudo rm -rf /tmp/ur_src \
     && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
