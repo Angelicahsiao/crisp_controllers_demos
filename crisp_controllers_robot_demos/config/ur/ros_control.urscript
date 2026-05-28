@@ -154,6 +154,8 @@ while keepalive > 0 and control_mode > MODE_STOPPED:
   if params_mult[0] > 0:
     keepalive = params_mult[1]
     if control_mode != params_mult[8]:
+      textmsg("ExternalControl: mode switch: from=", control_mode)
+      textmsg("ExternalControl: mode switch: to=", params_mult[8])
       control_mode = params_mult[8]
       join thread_move
       if control_mode == MODE_SERVOJ:

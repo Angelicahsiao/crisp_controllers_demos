@@ -9,7 +9,7 @@
   <xacro:arg name="tf_prefix"           default=""/>
 
   <xacro:arg name="script_filename"
-    default="$(find crisp_controllers_robot_demos)/config/ur/ros_control.urscript"/>
+    default="$(find ur_client_library)/resources/external_control.urscript"/>
   <xacro:arg name="output_recipe_filename"
     default="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
   <xacro:arg name="input_recipe_filename"
