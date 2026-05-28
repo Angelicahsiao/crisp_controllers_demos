@@ -127,8 +127,8 @@
         k_rot_y: 0.0
         k_rot_z: 0.0
       filter:
-        dq: 0.5
-        output_torque: 0.5
+        dq: 0.3
+        output_torque: 0.3
       max_delta_tau: 0.5
       nullspace:
         stiffness: 90.0
