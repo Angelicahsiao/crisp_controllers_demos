@@ -138,6 +138,12 @@ RUN sudo apt-get update && \
 # symbol the write silently fails and the robot never enters torque mode.
 # Building both packages from source gives us a liburcl that implements the full
 # ControlMode-aware API needed for direct_torque() over the reverse socket.
+#
+# Also patches prepare_command_mode_switch: the catch-all `version_info_.major < 5`
+# guard blocks torque when getVersion() returns {0,0,0} (e.g. if the PolyScope X
+# version string isn't parsed by the version reader). Removing it keeps the
+# meaningful version checks (e-Series < 5.23.0 and PolyScope X < 10.10.0) while
+# letting 10.12.1 through even if the major-version fallback misfires.
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && mkdir -p /tmp/ur_src/src && cd /tmp/ur_src/src \
     && git clone --depth 1 -b $ROS_DISTRO \
@@ -145,6 +151,9 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && git clone --depth 1 \
         https://github.com/UniversalRobots/Universal_Robots_Client_Library.git \
     && cd /tmp/ur_src \
+    && sed -i \
+        's/version_info_\.major < 5/false/' \
+        src/Universal_Robots_ROS2_Driver/ur_robot_driver/src/hardware_interface.cpp \
     && sudo apt-get update -qq \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y \
