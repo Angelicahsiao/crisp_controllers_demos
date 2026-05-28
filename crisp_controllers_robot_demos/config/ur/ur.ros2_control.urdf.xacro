@@ -35,7 +35,11 @@
           <param name="output_recipe_filename">$(find ur_robot_driver)/resources/rtde_output_recipe.txt</param>
           <param name="input_recipe_filename">$(find ur_robot_driver)/resources/rtde_input_recipe.txt</param>
           <param name="headless_mode">false</param>
-          <param name="script_filename">$(find crisp_controllers_robot_demos)/config/ur/ros_control.urscript</param>
+          <!-- Use the upstream urcl bundled script: it has full torque support
+               (direct_torque with friction_comp / viscous_scale / coulomb_scale)
+               that matches the latest ur_robot_driver write() path. Our previous
+               hand-edited copy was missing pieces that the driver expects. -->
+          <param name="script_filename">$(find ur_client_library)/resources/external_control.urscript</param>
           <param name="reverse_port">50001</param>
           <param name="script_sender_port">50002</param>
           <param name="trajectory_port">50003</param>
