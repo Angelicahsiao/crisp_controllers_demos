@@ -139,10 +139,10 @@
         weights:
           shoulder_pan_joint.value:  180.0
           shoulder_lift_joint.value: 180.0
-          elbow_joint.value:         290.0
-          wrist_1_joint.value:       300.0
-          wrist_2_joint.value:       300.0
-          wrist_3_joint.value:       300.0
+          elbow_joint.value:         150.0
+          wrist_1_joint.value:        20.0
+          wrist_2_joint.value:        20.0
+          wrist_3_joint.value:        20.0
       use_operational_space: false
       use_friction: false
       use_coriolis_compensation: false
