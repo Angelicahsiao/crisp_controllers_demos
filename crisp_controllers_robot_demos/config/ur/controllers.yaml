@@ -129,23 +129,23 @@
       filter:
         dq: 0.5
         output_torque: 0.5
-      max_delta_tau: 2.0      # larger rate limit avoids phase lag from excessive clamping
+      max_delta_tau: 0.5
       nullspace:
-        stiffness: 50.0
+        stiffness: 90.0
         projector_type: none
-        damping: 14.0
+        damping: 35.0
         max_tau: 450.0
         regularization: 1.0e-06
         weights:
-          shoulder_pan_joint.value:  150.0
-          shoulder_lift_joint.value: 150.0
-          elbow_joint.value:         150.0
-          wrist_1_joint.value:        15.0  # lower weight → less torque → less wrist oscillation
-          wrist_2_joint.value:        15.0
-          wrist_3_joint.value:        15.0
+          shoulder_pan_joint.value:  180.0
+          shoulder_lift_joint.value: 180.0
+          elbow_joint.value:         290.0
+          wrist_1_joint.value:       300.0
+          wrist_2_joint.value:       300.0
+          wrist_3_joint.value:       300.0
       use_operational_space: false
       use_friction: false
-      use_coriolis_compensation: true
+      use_coriolis_compensation: false
       use_local_jacobian: true
       use_gravity_compensation: false
       limit_error: true
