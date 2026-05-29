@@ -129,7 +129,7 @@
       filter:
         dq: 0.3
         output_torque: 0.3
-      max_delta_tau: 1.0
+      max_delta_tau: 5.0
       nullspace:
         stiffness: 5.0
         projector_type: none
