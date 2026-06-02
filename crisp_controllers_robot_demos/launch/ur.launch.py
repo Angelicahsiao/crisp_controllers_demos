@@ -191,6 +191,12 @@ def generate_launch_description():
             Node(
                 package="controller_manager",
                 executable="spawner",
+                arguments=["force_torque_sensor_broadcaster"],
+                output="screen",
+            ),
+            Node(
+                package="controller_manager",
+                executable="spawner",
                 arguments=["gravity_compensation", "--inactive"],
                 output="screen",
             ),

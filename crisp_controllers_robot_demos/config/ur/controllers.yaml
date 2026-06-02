@@ -19,6 +19,9 @@
       pose_broadcaster:
         type: crisp_controllers/PoseBroadcaster
 
+      force_torque_sensor_broadcaster:
+        type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
       gravity_compensation:
         type: crisp_controllers/CartesianController
 
@@ -76,6 +79,21 @@
         - wrist_3_joint
       end_effector_frame: tool0
       base_frame: base_link
+
+  # UR built-in wrist F/T sensor (RTDE → tcp_fts_sensor state interface).
+  # Publishes geometry_msgs/WrenchStamped on /force_torque_sensor_broadcaster/wrench
+  force_torque_sensor_broadcaster:
+    ros__parameters:
+      sensor_name: tcp_fts_sensor
+      state_interface_names:
+        - force.x
+        - force.y
+        - force.z
+        - torque.x
+        - torque.y
+        - torque.z
+      frame_id: tool0
+      topic_name: force_torque_sensor_broadcaster/wrench
 
   # Gravity compensation only — position free, orientation held at 30 Nm/rad.
   # UR firmware handles gravity via direct_torque(); controller adds friction/coriolis.
