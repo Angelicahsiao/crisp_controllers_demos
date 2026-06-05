@@ -267,7 +267,8 @@ services:
     <<: *ur-overlay
     container_name: crisp_controllers_demos_launch_ur_gripper
     command: >
-      bash -lc "source /opt/ros/humble/setup.bash &&
+      bash -lc "sudo chmod a+rw ${UR_COM_PORT:-/dev/ttyUSB0} &&
+      source /opt/ros/humble/setup.bash &&
       cd ~/ros2_ws &&
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
