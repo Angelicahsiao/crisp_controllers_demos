@@ -197,12 +197,12 @@
         dq: 0.5
         output_torque: 0.5
       task:
-        k_pos_x: 300.0        # UR16e: 600 → scaled by ~0.55
-        k_pos_y: 300.0
-        k_pos_z: 300.0
-        k_rot_x: 0.0
-        k_rot_y: 0.0
-        k_rot_z: 0.0
+        k_pos_x: 200.0
+        k_pos_y: 200.0
+        k_pos_z: 200.0
+        k_rot_x: 60.0
+        k_rot_y: 60.0
+        k_rot_z: 60.0
       nullspace:
         stiffness: 0.0
         damping: 0.0
