@@ -261,6 +261,26 @@ services:
       robot_ip:=${ROBOT_IP:-192.168.0.10}
       use_rviz:=true"
 
+  # UR + Robotiq 2F-140 gripper. Defaults to ur7e; override with UR_TYPE / ROBOT_IP /
+  # UR_COM_PORT. The gripper needs the USB-to-RS485 device, exposed via the /dev mount.
+  launch_ur_gripper:
+    <<: *ur-overlay
+    container_name: crisp_controllers_demos_launch_ur_gripper
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos ur.launch.py
+      ur_type:=${UR_TYPE:-ur7e}
+      use_fake_hardware:=${UR_FAKE_HARDWARE:-false}
+      robot_ip:=${ROBOT_IP:-192.168.0.10}
+      use_gripper:=true
+      com_port:=${UR_COM_PORT:-/dev/ttyUSB0}
+      use_rviz:=true"
+
   launch_kinova:
     <<: *kinova-overlay
     command: >
