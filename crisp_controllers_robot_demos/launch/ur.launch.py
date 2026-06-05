@@ -18,12 +18,16 @@ def robot_description_dependent_nodes_spawner(
     tf_prefix,
     headless_mode,
     start_robot_state_publisher,
+    use_gripper,
+    com_port,
 ):
     ur_type_str = context.perform_substitution(ur_type)
     robot_ip_str = context.perform_substitution(robot_ip)
     use_fake_hardware_str = context.perform_substitution(use_fake_hardware)
     tf_prefix_str = context.perform_substitution(tf_prefix)
     headless_mode_str = context.perform_substitution(headless_mode)
+    use_gripper_str = context.perform_substitution(use_gripper)
+    com_port_str = context.perform_substitution(com_port)
 
     pkg_share = get_package_share_directory("crisp_controllers_robot_demos")
     calibration_file = os.path.join(pkg_share, "config", "ur", f"{ur_type_str}_calibration.yaml")
@@ -33,17 +37,26 @@ def robot_description_dependent_nodes_spawner(
     )
     kinematics_file = calibration_file if os.path.exists(calibration_file) else default_kinematics
 
-    ur_xacro_filepath = os.path.join(pkg_share, "config", "ur", "ur_single.urdf.xacro")
+    # With a gripper, use the combined UR + Robotiq 2F-140 description so both
+    # hardware systems are loaded by the same controller_manager.
+    use_gripper_bool = use_gripper_str.lower() in ("true", "1", "yes")
+    xacro_filename = "ur_single_robotiq.urdf.xacro" if use_gripper_bool else "ur_single.urdf.xacro"
+    ur_xacro_filepath = os.path.join(pkg_share, "config", "ur", xacro_filename)
+
+    xacro_mappings = {
+        "ur_type": ur_type_str,
+        "robot_ip": robot_ip_str,
+        "use_fake_hardware": use_fake_hardware_str,
+        "tf_prefix": tf_prefix_str,
+        "headless_mode": headless_mode_str,
+        "kinematics_parameters_file": kinematics_file,
+    }
+    if use_gripper_bool:
+        xacro_mappings["com_port"] = com_port_str
+
     robot_description = xacro.process_file(
         ur_xacro_filepath,
-        mappings={
-            "ur_type": ur_type_str,
-            "robot_ip": robot_ip_str,
-            "use_fake_hardware": use_fake_hardware_str,
-            "tf_prefix": tf_prefix_str,
-            "headless_mode": headless_mode_str,
-            "kinematics_parameters_file": kinematics_file,
-        },
+        mappings=xacro_mappings,
     ).toprettyxml(indent="  ")
 
     # Real hardware: use_gravity_compensation=false (UR firmware's direct_torque
@@ -90,6 +103,8 @@ def generate_launch_description():
     headless_mode = LaunchConfiguration("headless_mode")
     use_rviz = LaunchConfiguration("use_rviz")
     start_robot_state_publisher = LaunchConfiguration("start_robot_state_publisher")
+    use_gripper = LaunchConfiguration("use_gripper")
+    com_port = LaunchConfiguration("com_port")
 
     rviz_file = os.path.join(
         get_package_share_directory("ur_description"),
@@ -106,6 +121,8 @@ def generate_launch_description():
             tf_prefix,
             headless_mode,
             start_robot_state_publisher,
+            use_gripper,
+            com_port,
         ],
     )
 
@@ -150,6 +167,16 @@ def generate_launch_description():
                 "start_robot_state_publisher",
                 default_value="true",
                 description="Start the robot_state_publisher node.",
+            ),
+            DeclareLaunchArgument(
+                "use_gripper",
+                default_value="false",
+                description="Attach a Robotiq 2F-140 to tool0 and spawn its controllers.",
+            ),
+            DeclareLaunchArgument(
+                "com_port",
+                default_value="/dev/ttyUSB0",
+                description="Serial port for the Robotiq 2F-140 (USB-to-RS485 adapter).",
             ),
             robot_description_dependent_nodes_spawner_opaque_function,
             Node(
@@ -199,6 +226,28 @@ def generate_launch_description():
                 executable="spawner",
                 arguments=["gravity_compensation", "--inactive"],
                 output="screen",
+            ),
+            # Robotiq 2F-140 controllers (only when use_gripper:=true)
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["robotiq_joint_state_broadcaster"],
+                output="screen",
+                condition=IfCondition(use_gripper),
+            ),
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["robotiq_activation_controller"],
+                output="screen",
+                condition=IfCondition(use_gripper),
+            ),
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["robotiq_gripper_controller"],
+                output="screen",
+                condition=IfCondition(use_gripper),
             ),
             Node(
                 package="rviz2",

@@ -37,6 +37,16 @@
       freedrive_mode_controller:
         type: ur_controllers/FreedriveModeController
 
+      # Robotiq 2F-140 gripper (spawned only when use_gripper:=true)
+      robotiq_gripper_controller:
+        type: position_controllers/GripperActionController
+
+      robotiq_activation_controller:
+        type: robotiq_controllers/RobotiqActivationController
+
+      robotiq_joint_state_broadcaster:
+        type: joint_state_broadcaster/JointStateBroadcaster
+
   joint_trajectory_controller:
     ros__parameters:
       command_interfaces:
@@ -219,3 +229,25 @@
   freedrive_mode_controller:
     ros__parameters:
       async_wait_for_acknowledgment: true
+
+  # === Robotiq 2F-140 gripper ===
+  # GripperActionController exposes /robotiq_gripper_controller/gripper_cmd (GripperCommand action).
+  # The 2F-140 hardware only exposes a position command interface, so use_effort/use_speed are off.
+  robotiq_gripper_controller:
+    ros__parameters:
+      default: true
+      joint: finger_joint
+      allow_stalling: true
+
+  # Provides a service to (re)activate the gripper via the reactivate_gripper GPIO.
+  robotiq_activation_controller:
+    ros__parameters:
+      default: true
+
+  # Dedicated broadcaster so the gripper joint is at a known index (0) on its own topic.
+  # crisp_py's Gripper reads feedback by index, so it must not share the arm's /joint_states.
+  robotiq_joint_state_broadcaster:
+    ros__parameters:
+      joints:
+        - finger_joint
+      use_local_topics: true

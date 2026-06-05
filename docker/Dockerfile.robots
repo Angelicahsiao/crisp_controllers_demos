@@ -187,15 +187,18 @@ COPY . src/crisp_controllers_demos
 
 RUN git clone --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
 RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
+RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
 
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt update \
+    && vcs import src < src/ros2_robotiq_gripper/ros2_robotiq_gripper.humble.repos --recursive --skip-existing \
     && rosdep update \
     && rosdep install -q --from-paths src --ignore-src -y \
-        --skip-keys "robotiq_driver robotiq_description" \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py
+        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver
 
 
 FROM franka AS franka-overlay
