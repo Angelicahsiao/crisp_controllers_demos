@@ -161,7 +161,7 @@
       nullspace:
         stiffness: 5.0
         projector_type: none
-        damping: 3.0
+        damping: 4.0
         max_tau: 1000.0
         regularization: 1.0e-06
         weights:
