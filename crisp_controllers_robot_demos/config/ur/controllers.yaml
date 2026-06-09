@@ -154,21 +154,18 @@
         k_rot_x: 0.0
         k_rot_y: 0.0
         k_rot_z: 0.0
-      filter:
-        dq: 0.4
-        output_torque: 0.4
-      max_delta_tau: 2.0
+      max_delta_tau: 0.5
       nullspace:
         stiffness: 5.0
         projector_type: none
-        damping: 4.0
-        max_tau: 1000.0
+        damping: 1.0
+        max_tau: 5.0
         regularization: 1.0e-06
         weights:
-          shoulder_pan_joint.value:  180.0
-          shoulder_lift_joint.value: 180.0
-          elbow_joint.value:         120.0
-          wrist_1_joint.value:         5.0
+          shoulder_pan_joint.value:   15.0
+          shoulder_lift_joint.value:  15.0
+          elbow_joint.value:           8.0
+          wrist_1_joint.value:         8.0
           wrist_2_joint.value:         5.0
           wrist_3_joint.value:         5.0
       use_operational_space: false
