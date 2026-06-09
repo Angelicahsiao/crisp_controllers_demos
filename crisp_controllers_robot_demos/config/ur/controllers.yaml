@@ -167,7 +167,7 @@
         weights:
           shoulder_pan_joint.value:  180.0
           shoulder_lift_joint.value: 180.0
-          elbow_joint.value:         150.0
+          elbow_joint.value:         120.0
           wrist_1_joint.value:         5.0
           wrist_2_joint.value:         5.0
           wrist_3_joint.value:         5.0
