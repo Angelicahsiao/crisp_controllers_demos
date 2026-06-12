@@ -28,6 +28,9 @@
       joint_impedance_controller:
         type: crisp_controllers/CartesianController
 
+      force_torque_sensor_broadcaster:
+        type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
       # Robotiq 2F-140 gripper (spawned only when use_gripper:=true)
       robotiq_gripper_controller:
         type: position_controllers/GripperActionController
@@ -184,6 +187,20 @@
       use_coriolis_compensation: true
       use_local_jacobian: true
       use_gravity_compensation: false
+
+  # Mock wrist F/T sensor — publishes zeros (no contact forces in sim).
+  force_torque_sensor_broadcaster:
+    ros__parameters:
+      sensor_name: tcp_fts_sensor
+      state_interface_names:
+        - force.x
+        - force.y
+        - force.z
+        - torque.x
+        - torque.y
+        - torque.z
+      frame_id: tool0
+      topic_name: force_torque_sensor_broadcaster/wrench
 
   # === Robotiq 2F-140 gripper (mock hardware) ===
   robotiq_gripper_controller:
