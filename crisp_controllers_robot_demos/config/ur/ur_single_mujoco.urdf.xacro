@@ -62,10 +62,12 @@
   </ros2_control>
 
   <!-- Mock wrist F/T sensor so force_torque_sensor_broadcaster can activate.
-       Publishes zeros — the MuJoCo model does not simulate contact forces. -->
-  <ros2_control name="URFTSensorMock" type="sensor">
+       Publishes zeros — the MuJoCo model does not simulate contact forces.
+       mock_components only provides GenericSystem (there is no GenericSensor
+       plugin in Humble), so the sensor lives in a joint-less system block. -->
+  <ros2_control name="URFTSensorMock" type="system">
     <hardware>
-      <plugin>mock_components/GenericSensor</plugin>
+      <plugin>mock_components/GenericSystem</plugin>
     </hardware>
     <sensor name="${tf_prefix_val}tcp_fts_sensor">
       <state_interface name="force.x"/>
