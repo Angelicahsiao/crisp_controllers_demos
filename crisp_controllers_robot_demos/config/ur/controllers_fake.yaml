@@ -1,6 +1,7 @@
-# Fake hardware controller config (mock_components/GenericSystem).
-# use_gravity_compensation is true so torque output is physically
-# meaningful if a physics simulator is swapped in for mock_components.
+# Fake hardware controller config (crisp_mujoco_sim/Simulator for the arm,
+# mock_components for the Robotiq). The MuJoCo scene (ur7e_scene.xml) runs with
+# gravity disabled, so use_gravity_compensation must stay false everywhere.
+# use_friction is false: the sim models friction via MJCF joint damping instead.
 /**:
   controller_manager:
     ros__parameters:
@@ -103,10 +104,10 @@
       nullspace:
         stiffness: 0.0
 
-      use_friction: true
+      use_friction: false
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: true
+      use_gravity_compensation: false
 
   joint_impedance_controller:
     ros__parameters:
@@ -144,10 +145,10 @@
           wrist_2_joint.value:        50.0
           wrist_3_joint.value:        20.0
 
-      use_friction: true
+      use_friction: false
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: true
+      use_gravity_compensation: false
       limit_error: true
       limit_torques: true
 
@@ -182,7 +183,7 @@
       use_friction: false
       use_coriolis_compensation: true
       use_local_jacobian: true
-      use_gravity_compensation: true
+      use_gravity_compensation: false
 
   # === Robotiq 2F-140 gripper (mock hardware) ===
   robotiq_gripper_controller:

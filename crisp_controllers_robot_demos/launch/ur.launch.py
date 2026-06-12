@@ -39,20 +39,32 @@ def robot_description_dependent_nodes_spawner(
 
     # With a gripper, use the combined UR + Robotiq 2F-140 description so both
     # hardware systems are loaded by the same controller_manager.
+    # Fake hardware runs the arm in MuJoCo (crisp_mujoco_sim) so the effort-based
+    # CIC/JIC controllers work — mock_components rejects effort interfaces.
     use_gripper_bool = use_gripper_str.lower() in ("true", "1", "yes")
-    xacro_filename = "ur_single_robotiq.urdf.xacro" if use_gripper_bool else "ur_single.urdf.xacro"
+    use_fake_hardware_bool = use_fake_hardware_str.lower() in ("true", "1", "yes")
+    if use_fake_hardware_bool:
+        xacro_filename = "ur_single_mujoco.urdf.xacro"
+        xacro_mappings = {
+            "ur_type": ur_type_str,
+            "tf_prefix": tf_prefix_str,
+            "use_gripper": use_gripper_str,
+            "mujoco_model": os.path.join(pkg_share, "config", "ur", "ur7e_scene.xml"),
+            "kinematics_parameters_file": kinematics_file,
+        }
+    else:
+        xacro_filename = "ur_single_robotiq.urdf.xacro" if use_gripper_bool else "ur_single.urdf.xacro"
+        xacro_mappings = {
+            "ur_type": ur_type_str,
+            "robot_ip": robot_ip_str,
+            "use_fake_hardware": use_fake_hardware_str,
+            "tf_prefix": tf_prefix_str,
+            "headless_mode": headless_mode_str,
+            "kinematics_parameters_file": kinematics_file,
+        }
+        if use_gripper_bool:
+            xacro_mappings["com_port"] = com_port_str
     ur_xacro_filepath = os.path.join(pkg_share, "config", "ur", xacro_filename)
-
-    xacro_mappings = {
-        "ur_type": ur_type_str,
-        "robot_ip": robot_ip_str,
-        "use_fake_hardware": use_fake_hardware_str,
-        "tf_prefix": tf_prefix_str,
-        "headless_mode": headless_mode_str,
-        "kinematics_parameters_file": kinematics_file,
-    }
-    if use_gripper_bool:
-        xacro_mappings["com_port"] = com_port_str
 
     robot_description = xacro.process_file(
         ur_xacro_filepath,
