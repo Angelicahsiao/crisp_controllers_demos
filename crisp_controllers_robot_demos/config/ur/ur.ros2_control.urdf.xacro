@@ -43,6 +43,10 @@
           <param name="trajectory_port">50003</param>
           <param name="script_command_port">50004</param>
           <param name="non_blocking_read">true</param>
+          <!-- Number of consecutive RTDE keep-alive misses before the driver
+               declares the robot disconnected.  Added in humble-branch ur_robot_driver
+               after the initial release; stoi() is called on this value. -->
+          <param name="keep_alive_count">2</param>
           <!-- Tool I/O communication parameters required by URPositionHardwareInterface.
                stoi() is called on the integer ones; missing keys produce an empty
                string that makes stoi("") throw std::invalid_argument. -->
