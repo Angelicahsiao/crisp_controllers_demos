@@ -10,18 +10,16 @@
                          false → ur_robot_driver/URPositionHardwareInterface
     - tf_prefix: Optional prefix for all joint/link names (without trailing underscore)
     - kinematics_parameters_file: Path to the robot calibration YAML
-
-  Effort (torque) command interface:
-    Supported on PolyScope X >= 10.12.1 via URScript direct_torque().
-    headless_mode=false: teach pendant runs the External Control program which loads
-    ros_control.urscript. The script receives torque commands via the reverse port.
+    - headless_mode: true → driver pushes URScript over port 30001 (pendant in Remote Control)
+                     false → pendant runs External Control program that loads the script
 -->
 <xacro:macro name="ur_arm_ros2_control"
          params="name
              robot_ip
              use_fake_hardware
              tf_prefix:=''
-             kinematics_parameters_file">
+             kinematics_parameters_file
+             headless_mode:='true'">
 
     <xacro:property name="prefix" value="${tf_prefix + '_' if tf_prefix != '' else ''}"/>
 
@@ -34,7 +32,7 @@
           <param name="kinematics_parameters_file">${kinematics_parameters_file}</param>
           <param name="output_recipe_filename">$(find ur_robot_driver)/resources/rtde_output_recipe.txt</param>
           <param name="input_recipe_filename">$(find ur_robot_driver)/resources/rtde_input_recipe.txt</param>
-          <param name="headless_mode">false</param>
+          <param name="headless_mode">${headless_mode}</param>
           <!-- Use the upstream urcl bundled script: it has full torque support
                (direct_torque with friction_comp / viscous_scale / coulomb_scale)
                that matches the latest ur_robot_driver write() path. Our previous

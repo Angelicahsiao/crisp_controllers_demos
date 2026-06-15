@@ -3,6 +3,7 @@
 
   <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
   <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+  <xacro:include filename="$(find crisp_controllers_robot_demos)/config/ur/ur.ros2_control.urdf.xacro"/>
 
   <xacro:arg name="ur_type"             default="ur5e"/>
   <xacro:arg name="robot_ip"            default="192.168.56.101"/>
@@ -18,12 +19,6 @@
   <!-- Robotiq 2F-140 serial port. USB-to-RS485 adapter on the host. -->
   <xacro:arg name="com_port"            default="/dev/ttyUSB0"/>
 
-  <xacro:arg name="script_filename"
-    default="$(find ur_client_library)/resources/external_control.urscript"/>
-  <xacro:arg name="output_recipe_filename"
-    default="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
-  <xacro:arg name="input_recipe_filename"
-    default="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"/>
   <xacro:arg name="kinematics_parameters_file"
     default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
 
@@ -32,6 +27,9 @@
 
   <link name="world"/>
 
+  <!-- generate_ros2_control_tag="false": the apt ur_description macro does not honour
+       script_filename/recipe params and produces a to_be_filled_by_ur_robot_driver
+       placeholder. The custom ur_arm_ros2_control macro below embeds the correct paths. -->
   <xacro:ur_robot
     name="${ur_type_val}"
     tf_prefix="${tf_prefix_val}"
@@ -40,15 +38,17 @@
     kinematics_parameters_file="$(arg kinematics_parameters_file)"
     physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
     visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
-    robot_ip="$(arg robot_ip)"
-    use_fake_hardware="$(arg use_fake_hardware)"
-    headless_mode="$(arg headless_mode)"
-    script_filename="$(arg script_filename)"
-    output_recipe_filename="$(arg output_recipe_filename)"
-    input_recipe_filename="$(arg input_recipe_filename)"
-    generate_ros2_control_tag="true">
+    generate_ros2_control_tag="false">
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:ur_robot>
+
+  <xacro:ur_arm_ros2_control
+    name="${ur_type_val}"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    tf_prefix="${tf_prefix_val}"
+    headless_mode="$(arg headless_mode)"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"/>
 
   <!-- Attach the Robotiq 2F-140 to the UR tool flange (tool0).
        include_ros2_control adds a second hardware system (finger_joint position
