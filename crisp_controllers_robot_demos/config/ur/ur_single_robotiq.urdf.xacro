@@ -4,26 +4,12 @@
   <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
   <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
 
-  <xacro:arg name="ur_type"             default="ur5e"/>
-  <xacro:arg name="robot_ip"            default="192.168.56.101"/>
-  <xacro:arg name="use_fake_hardware"   default="false"/>
-  <xacro:arg name="tf_prefix"           default=""/>
-  <!-- headless_mode=true bypasses URCapX ScriptBuilder entirely.
-       The driver pushes external_control.urscript directly over port 30001.
-       Required for torque control when URCapX ExternalControl < 1.2.0
-       (older versions generate their own program loop that omits MODE_TORQUE).
-       Prerequisite: pendant must be in Remote Control mode. -->
-  <xacro:arg name="headless_mode"       default="true"/>
-
-  <!-- Robotiq 2F-140 serial port. USB-to-RS485 adapter on the host. -->
-  <xacro:arg name="com_port"            default="/dev/ttyUSB0"/>
-
-  <xacro:arg name="script_filename"
-    default="$(find ur_client_library)/resources/external_control.urscript"/>
-  <xacro:arg name="output_recipe_filename"
-    default="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
-  <xacro:arg name="input_recipe_filename"
-    default="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"/>
+  <xacro:arg name="ur_type"                    default="ur5e"/>
+  <xacro:arg name="tf_prefix"                  default=""/>
+  <xacro:arg name="robot_ip"                   default="0.0.0.0"/>
+  <xacro:arg name="use_fake_hardware"          default="false"/>
+  <xacro:arg name="headless_mode"              default="false"/>
+  <xacro:arg name="com_port"                   default="/dev/ttyUSB0"/>
   <xacro:arg name="kinematics_parameters_file"
     default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
 
@@ -43,16 +29,10 @@
     robot_ip="$(arg robot_ip)"
     use_fake_hardware="$(arg use_fake_hardware)"
     headless_mode="$(arg headless_mode)"
-    script_filename="$(arg script_filename)"
-    output_recipe_filename="$(arg output_recipe_filename)"
-    input_recipe_filename="$(arg input_recipe_filename)"
     generate_ros2_control_tag="true">
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:ur_robot>
 
-  <!-- Attach the Robotiq 2F-140 to the UR tool flange (tool0).
-       include_ros2_control adds a second hardware system (finger_joint position
-       command + reactivate_gripper GPIO) loaded by the UR controller_manager. -->
   <xacro:robotiq_gripper
     name="RobotiqGripperHardwareInterface"
     prefix="${tf_prefix_val}"
