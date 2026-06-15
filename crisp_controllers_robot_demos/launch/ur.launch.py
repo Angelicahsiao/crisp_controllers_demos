@@ -74,7 +74,7 @@ def robot_description_dependent_nodes_spawner(
     # Real hardware: use_gravity_compensation=false (UR firmware's direct_torque
     # applies gravity automatically; enabling it in the controller double-counts).
     # Fake hardware: use_gravity_compensation=true for physically correct torques.
-    controllers_yaml = "controllers_fake.yaml" if use_fake_hardware_str == "true" else "controllers.yaml"
+    controllers_yaml = "controllers_fake.yaml" if use_fake_hardware_bool else "controllers.yaml"
     ur_controllers = os.path.join(
         get_package_share_directory("crisp_controllers_robot_demos"),
         "config",
