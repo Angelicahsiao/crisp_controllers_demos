@@ -41,8 +41,9 @@
       robotiq_joint_state_broadcaster:
         type: joint_state_broadcaster/JointStateBroadcaster
 
-  # JTC uses effort command interfaces (MuJoCo hardware only exposes effort).
-  # PID converts position tracking error to effort, matching the Franka pattern.
+  # JTC uses effort command interfaces because the MuJoCo hardware
+  # (crisp_mujoco_sim/Simulator) only exposes an effort command interface.
+  # PID converts position tracking error to effort, matching the Franka fake setup.
   joint_trajectory_controller:
     ros__parameters:
       command_interfaces:
