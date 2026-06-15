@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur">
+
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+
+  <xacro:arg name="ur_type"                    default="ur5e"/>
+  <xacro:arg name="tf_prefix"                  default=""/>
+  <xacro:arg name="robot_ip"                   default="0.0.0.0"/>
+  <xacro:arg name="use_fake_hardware"          default="false"/>
+  <xacro:arg name="headless_mode"              default="false"/>
+  <xacro:arg name="com_port"                   default="/dev/ttyUSB0"/>
+  <xacro:arg name="kinematics_parameters_file"
+    default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
+
+  <xacro:property name="ur_type_val"   value="${xacro.arg('ur_type')}"/>
+  <xacro:property name="tf_prefix_val" value="${xacro.arg('tf_prefix')}"/>
+
+  <link name="world"/>
+
+  <xacro:ur_robot
+    name="${ur_type_val}"
+    tf_prefix="${tf_prefix_val}"
+    parent="world"
+    joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"
+    physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    headless_mode="$(arg headless_mode)"
+    generate_ros2_control_tag="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix="${tf_prefix_val}"
+    parent="tool0"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    com_port="$(arg com_port)"
+    include_ros2_control="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+
+</robot>

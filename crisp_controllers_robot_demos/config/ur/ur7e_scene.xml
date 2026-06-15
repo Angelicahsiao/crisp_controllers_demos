@@ -1,0 +1,6 @@
+<mujoco model="ur7e scene">
+  <include file="ur7e.xml"/>
+  <!-- Gravity disabled, mirroring the fr3 sim setup: controllers_fake.yaml runs with
+       use_gravity_compensation=false, so the sim must not apply gravity either. -->
+  <option gravity="0 0 0"/>
+</mujoco>
