@@ -1,7 +1,10 @@
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 if [ -z "$ROS_NETWORK_INTERFACE" ]; then
-    echo "ROS_NETWORK_INTERFACE is not set. Defaulting to 'enp0s31f6'."
     export ROS_NETWORK_INTERFACE=enp0s31f6
+fi
+if ! ip link show "$ROS_NETWORK_INTERFACE" > /dev/null 2>&1; then
+    echo "ROS_NETWORK_INTERFACE '$ROS_NETWORK_INTERFACE' not found, falling back to 'lo'."
+    export ROS_NETWORK_INTERFACE=lo
 fi
 
 # CycloneDDS (RoboStack/apt builds) does not expand ${ROS_NETWORK_INTERFACE}
