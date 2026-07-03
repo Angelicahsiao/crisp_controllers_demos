@@ -137,7 +137,7 @@
         stiffness: 10.0
         projector_type: none
         damping: 1.5
-        max_tau: 10.0
+        max_tau: 20.0
         regularization: 1.0e-06
         weights:
           shoulder_pan_joint.value:  15.0
