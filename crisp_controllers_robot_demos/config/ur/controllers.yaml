@@ -131,7 +131,7 @@
         k_rot_y: 0.0
         k_rot_z: 0.0
 
-      max_delta_tau: 0.5
+      max_delta_tau: 1.0
 
       nullspace:
         stiffness: 10.0
