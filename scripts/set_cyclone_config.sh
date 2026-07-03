@@ -3,8 +3,15 @@ if [ -z "$ROS_NETWORK_INTERFACE" ]; then
     export ROS_NETWORK_INTERFACE=enp0s31f6
 fi
 # Use /sys/class/net rather than `ip` so the check works without iproute2.
+# The interface must exist AND be up with a carrier: CycloneDDS cannot bind to
+# an interface that has no address (e.g. cable unplugged), and the ros2 daemon
+# dies with returncode 1.
 if [ ! -e "/sys/class/net/$ROS_NETWORK_INTERFACE" ]; then
     echo "ROS_NETWORK_INTERFACE '$ROS_NETWORK_INTERFACE' not found, falling back to 'lo'."
+    export ROS_NETWORK_INTERFACE=lo
+elif [ "$(cat /sys/class/net/$ROS_NETWORK_INTERFACE/operstate 2>/dev/null)" != "up" ] \
+        && [ "$ROS_NETWORK_INTERFACE" != "lo" ]; then
+    echo "ROS_NETWORK_INTERFACE '$ROS_NETWORK_INTERFACE' is not up (cable unplugged?), falling back to 'lo'."
     export ROS_NETWORK_INTERFACE=lo
 fi
 
