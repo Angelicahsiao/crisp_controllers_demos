@@ -7,7 +7,8 @@
       </Interfaces>
     </General>
     <Discovery>
-      <ParticipantIndex>none</ParticipantIndex>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>200</MaxAutoParticipantIndex>
     </Discovery>
   </Domain>
 </CycloneDDS>

@@ -1,0 +1,96 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur">
+
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+
+  <xacro:arg name="ur_type"           default="ur7e"/>
+  <xacro:arg name="tf_prefix"         default=""/>
+  <xacro:arg name="use_gripper"       default="false"/>
+  <!-- MJCF scene loaded by crisp_mujoco_sim/Simulator. -->
+  <xacro:arg name="mujoco_model"
+    default="$(find crisp_controllers_robot_demos)/config/ur/ur7e_scene.xml"/>
+  <xacro:arg name="kinematics_parameters_file"
+    default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
+
+  <xacro:property name="ur_type_val"   value="${xacro.arg('ur_type')}"/>
+  <xacro:property name="tf_prefix_val" value="${xacro.arg('tf_prefix')}"/>
+
+  <link name="world"/>
+
+  <!-- Kinematic/visual URDF only — generate_ros2_control_tag=false because the
+       hardware is the MuJoCo simulator below, not the UR driver/mock. -->
+  <xacro:ur_robot
+    name="${ur_type_val}"
+    tf_prefix="${tf_prefix_val}"
+    parent="world"
+    joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"
+    physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
+    generate_ros2_control_tag="false">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <!-- MuJoCo-backed arm: effort command + position/velocity/effort state,
+       exactly the interface set crisp_mujoco_sim/Simulator requires.
+       Joint order must match the MJCF (mapping is by index).
+       Initial values match the MJCF "home" keyframe. -->
+  <ros2_control name="URMuJoCoHardwareInterface" type="system">
+    <hardware>
+      <plugin>crisp_mujoco_sim/Simulator</plugin>
+      <param name="mujoco_model">$(arg mujoco_model)</param>
+    </hardware>
+
+    <xacro:macro name="sim_joint" params="joint_name initial_position">
+      <joint name="${joint_name}">
+        <command_interface name="effort"/>
+        <state_interface name="position">
+          <param name="initial_value">${initial_position}</param>
+        </state_interface>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </xacro:macro>
+
+    <xacro:sim_joint joint_name="${tf_prefix_val}shoulder_pan_joint"  initial_position="0.0"/>
+    <xacro:sim_joint joint_name="${tf_prefix_val}shoulder_lift_joint" initial_position="-1.5708"/>
+    <xacro:sim_joint joint_name="${tf_prefix_val}elbow_joint"         initial_position="1.5708"/>
+    <xacro:sim_joint joint_name="${tf_prefix_val}wrist_1_joint"       initial_position="-1.5708"/>
+    <xacro:sim_joint joint_name="${tf_prefix_val}wrist_2_joint"       initial_position="-1.5708"/>
+    <xacro:sim_joint joint_name="${tf_prefix_val}wrist_3_joint"       initial_position="0.0"/>
+  </ros2_control>
+
+  <!-- Mock wrist F/T sensor so force_torque_sensor_broadcaster can activate.
+       Publishes zeros — the MuJoCo model does not simulate contact forces.
+       mock_components only provides GenericSystem (there is no GenericSensor
+       plugin in Humble), so the sensor lives in a joint-less system block. -->
+  <ros2_control name="URFTSensorMock" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <sensor name="${tf_prefix_val}tcp_fts_sensor">
+      <state_interface name="force.x"/>
+      <state_interface name="force.y"/>
+      <state_interface name="force.z"/>
+      <state_interface name="torque.x"/>
+      <state_interface name="torque.y"/>
+      <state_interface name="torque.z"/>
+    </sensor>
+  </ros2_control>
+
+  <!-- Robotiq 2F-140 on mock hardware: the gripper controllers stay functional,
+       but the fingers are not physically simulated (the MJCF carries the gripper
+       only as a rigid payload on the flange). -->
+  <xacro:if value="$(arg use_gripper)">
+    <xacro:robotiq_gripper
+      name="RobotiqGripperHardwareInterface"
+      prefix="${tf_prefix_val}"
+      parent="tool0"
+      use_fake_hardware="true"
+      include_ros2_control="true">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:robotiq_gripper>
+  </xacro:if>
+
+</robot>

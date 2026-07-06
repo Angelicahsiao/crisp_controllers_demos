@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur">
+
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find crisp_controllers_robot_demos)/config/ur/ur.ros2_control.urdf.xacro"/>
+
+  <xacro:arg name="ur_type"             default="ur5e"/>
+  <xacro:arg name="robot_ip"            default="192.168.56.101"/>
+  <xacro:arg name="use_fake_hardware"   default="false"/>
+  <xacro:arg name="tf_prefix"           default=""/>
+  <!-- headless_mode=true bypasses URCapX ScriptBuilder entirely.
+       The driver pushes external_control.urscript directly over port 30001.
+       Required for torque control when URCapX ExternalControl < 1.2.0
+       (older versions generate their own program loop that omits MODE_TORQUE).
+       Prerequisite: pendant must be in Remote Control mode. -->
+  <xacro:arg name="headless_mode"       default="true"/>
+
+  <xacro:arg name="kinematics_parameters_file"
+    default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
+
+  <xacro:property name="ur_type_val"   value="${xacro.arg('ur_type')}"/>
+  <xacro:property name="tf_prefix_val" value="${xacro.arg('tf_prefix')}"/>
+
+  <link name="world"/>
+
+  <!-- generate_ros2_control_tag="false": the apt ur_description macro does not honour
+       script_filename/recipe params and produces a to_be_filled_by_ur_robot_driver
+       placeholder. The custom ur_arm_ros2_control macro below embeds the correct paths. -->
+  <xacro:ur_robot
+    name="${ur_type_val}"
+    tf_prefix="${tf_prefix_val}"
+    parent="world"
+    joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"
+    physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
+    generate_ros2_control_tag="false">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <xacro:ur_arm_ros2_control
+    name="${ur_type_val}"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    tf_prefix="${tf_prefix_val}"
+    headless_mode="$(arg headless_mode)"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"/>
+
+</robot>

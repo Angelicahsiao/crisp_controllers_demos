@@ -84,16 +84,17 @@ FROM base AS franka
 
 # === FRANKA ROS2 ===
 RUN git clone https://github.com/frankarobotics/franka_ros2.git -b $ROS_DISTRO src/franka_ros2 \
-    && cd src/franka_ros2 \
-    && cd /home/ros/ros2_ws \
     && source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt-get update \
-    && vcs import src < src/franka_ros2/franka.repos --recursive --skip-existing \
+    && if [ -f src/franka_ros2/franka.repos ]; then \
+         vcs import src < src/franka_ros2/franka.repos --recursive --skip-existing; \
+       fi \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y \
     && touch src/franka_ros2/franka_gazebo/COLCON_IGNORE \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
-    && touch src/franka_ros2/COLCON_IGNORE src/libfranka/COLCON_IGNORE src/franka_description/COLCON_IGNORE
+    && touch src/franka_ros2/COLCON_IGNORE src/franka_description/COLCON_IGNORE \
+    && if [ -d src/libfranka ]; then touch src/libfranka/COLCON_IGNORE; fi
 
 FROM base AS kinova
 
@@ -117,23 +118,111 @@ RUN git clone https://github.com/ICube-Robotics/iiwa_ros2.git src/iiwa_ros2 \
     && touch src/iiwa_ros2/COLCON_IGNORE
 
 
+FROM base AS ur
 
-FROM franka AS franka-overlay
+# Create src/ as the ros user so that COPY and git clone in the overlay stage
+# have the correct ownership (other stages create src/ implicitly via git clone).
+RUN mkdir -p src
+
+# === UR ROS2 (via apt) ===
+# ros-$ROS_DISTRO-ur is the meta-package that pulls in:
+#   ur_robot_driver, ur_description, ur_controllers, ur_msgs, ur_client_library
+RUN sudo apt-get update && \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ros-$ROS_DISTRO-ur \
+    && sudo rm -rf /var/lib/apt/lists/*
+
+# === Override ur_robot_driver + ur_client_library with source builds ===
+# Root cause: apt liburcl 2.11.0 does not export
+#   writeJointCommand(array<double,6>, ControlMode, RobotReceiveTimeout)
+# which the current driver plugin calls for MODE_TORQUE=8. Without the correct
+# symbol the write silently fails and the robot never enters torque mode.
+# Building both packages from source gives us a liburcl that implements the full
+# ControlMode-aware API needed for direct_torque() over the reverse socket.
+#
+# Also patches prepare_command_mode_switch: the catch-all `version_info_.major < 5`
+# guard blocks torque when getVersion() returns {0,0,0} (e.g. if the PolyScope X
+# version string isn't parsed by the version reader). Removing it keeps the
+# meaningful version checks (e-Series < 5.23.0 and PolyScope X < 10.10.0) while
+# letting 10.12.1 through even if the major-version fallback misfires.
+RUN source /opt/ros/$ROS_DISTRO/setup.bash \
+    && mkdir -p /tmp/ur_src/src && cd /tmp/ur_src/src \
+    && git clone --depth 1 -b $ROS_DISTRO \
+        https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git \
+    && git clone --depth 1 \
+        https://github.com/UniversalRobots/Universal_Robots_Client_Library.git \
+    && cd /tmp/ur_src \
+    && sed -i \
+        's/version_info_\.major < 5/false/' \
+        src/Universal_Robots_ROS2_Driver/ur_robot_driver/src/hardware_interface.cpp \
+    && sudo apt-get update -qq \
+    && rosdep update \
+    && rosdep install --from-paths src --ignore-src -r -y \
+    && colcon build --packages-select ur_client_library ur_robot_driver ur_calibration \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    && sudo cp install/ur_robot_driver/lib/libur_robot_driver_plugin.so \
+        /opt/ros/$ROS_DISTRO/lib/libur_robot_driver_plugin.so \
+    && sudo cp -r install/ur_robot_driver/share/ur_robot_driver/resources/. \
+        /opt/ros/$ROS_DISTRO/share/ur_robot_driver/resources/ \
+    && sudo find install/ur_client_library/lib -name "liburcl*" \
+        -exec cp -P {} /opt/ros/$ROS_DISTRO/lib/x86_64-linux-gnu/ \; \
+    && sudo mkdir -p /opt/ros/$ROS_DISTRO/share/ur_client_library/resources \
+    && sudo cp install/ur_client_library/share/ur_client_library/resources/external_control.urscript \
+        /opt/ros/$ROS_DISTRO/share/ur_client_library/resources/external_control.urscript \
+    && grep -q "MODE_TORQUE = 8" \
+        /opt/ros/$ROS_DISTRO/share/ur_client_library/resources/external_control.urscript \
+        || (echo "ERROR: rebuilt external_control.urscript is missing MODE_TORQUE" && exit 1) \
+    && sudo cp install/ur_calibration/lib/ur_calibration/calibration_correction \
+        /opt/ros/$ROS_DISTRO/lib/ur_calibration/calibration_correction \
+    && sudo cp -r install/ur_calibration/share/ur_calibration/. \
+        /opt/ros/$ROS_DISTRO/share/ur_calibration/ \
+    && cd / && sudo rm -rf /tmp/ur_src \
+    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+
+
+FROM ur AS ur-overlay
 
 ARG CRISP_CONTROLLERS_VERSION=1.1.0
 
 COPY . src/crisp_controllers_demos
 
+RUN git clone --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
+RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
+RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
+
+RUN source /opt/ros/$ROS_DISTRO/setup.bash \
+    && sudo apt update \
+    && vcs import src < src/ros2_robotiq_gripper/ros2_robotiq_gripper.humble.repos --recursive --skip-existing \
+    && rosdep update \
+    && rosdep install -q --from-paths src --ignore-src -y \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
+
+
+FROM franka AS franka-overlay
+
+ARG CRISP_CONTROLLERS_VERSION=1.1.0
+
+# COPY . src/crisp_controllers_demos
+
 RUN git clone  --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
 RUN git clone https://github.com/danielsanjosepro/franka_broadcasters.git src/franka_broadcasters
+RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
+RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
 
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && source /home/ros/ros2_ws/install/setup.bash \
     && sudo apt update \
+    && vcs import src < src/ros2_robotiq_gripper/ros2_robotiq_gripper.humble.repos --recursive --skip-existing \
     && rosdep update \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos franka_force_feedback_controllers
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver
 
 
 FROM kinova AS kinova-overlay
@@ -168,4 +257,3 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos
-

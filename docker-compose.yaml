@@ -25,12 +25,12 @@ x-cameras-base: &cameras-base
   environment:
     - QT_X11_NO_MITSHM=1
     - DISPLAY=$DISPLAY
-    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-100}
+    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
     - RCUTILS_COLORIZED_OUTPUT=1
     - SHELL=/bin/bash
     - CAMERA_NAME=camera
     - CAMERA_NAMESPACE=camera
-    - ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo}
+    - ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6}
     - SERIAL_NUMBER=$SERIAL_NUMBER
     - RMW=${RMW:-fastdds}
     - ROS_DISTRO=${ROS_DISTRO_CAMERAS:-humble}
@@ -85,6 +85,8 @@ x-base: &base
     - $HOME/.Xauthority:/root/.Xauthority
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
     - /dev:/dev
+    - .:/home/ros/ros2_ws/src/crisp_controllers_demos
+    - ../crisp_py:/home/ros/ros2_ws/src/crisp_py
   device_cgroup_rules:
     - 'c 81:* rmw'
     - 'c 189:* rmw'
@@ -95,11 +97,11 @@ x-base: &base
   environment:
     QT_X11_NO_MITSHM: 1
     DISPLAY: ${DISPLAY}
-    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-100}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
     RMW: ${RMW:-fastdds}
-    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
     ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
@@ -128,6 +130,31 @@ x-kinova-overlay: &kinova-overlay
       ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     target: kinova-overlay
 
+# UR and Franka pin to Humble at both build- and run-time. The runtime
+# environment block is redefined (YAML merge does not deep-merge env maps)
+# so /ros_entrypoint.sh sources /opt/ros/humble/setup.bash on container start.
+x-ur-overlay: &ur-overlay
+  <<: *base
+  image: crisp_controllers_demos:ur-overlay
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.robots
+    args:
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
+    target: ur-overlay
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    PYTHONPATH: /home/ros/ros2_ws/src/crisp_py
+
 x-franka: &franka
   <<: *base
   image: crisp_controllers_demos:franka
@@ -135,8 +162,18 @@ x-franka: &franka
     context: .
     dockerfile: docker/Dockerfile.robots
     args:
-      ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-fastdds}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 x-franka-overlay: &franka-overlay
   <<: *base
@@ -145,8 +182,18 @@ x-franka-overlay: &franka-overlay
     context: .
     dockerfile: docker/Dockerfile.robots
     args:
-      ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
+      ROS_DISTRO: ${ROS_DISTRO:-humble}
     target: franka-overlay
+  environment:
+    QT_X11_NO_MITSHM: 1
+    DISPLAY: ${DISPLAY}
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
+    RCUTILS_COLORIZED_OUTPUT: 1
+    SHELL: /bin/bash
+    RMW: ${RMW:-fastdds}
+    ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 
 services:
@@ -163,10 +210,13 @@ services:
   kinova-overlay:
     <<: *kinova-overlay
 
+  ur-overlay:
+    <<: *ur-overlay
+
   launch_zenoh_router:
     <<: *base
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       export RMW_IMPLEMENTATION=rmw_zenoh_cpp &&
       export RUST_LOG=zenoh=info &&
       ros2 doctor -r | grep rmw_zenoh_cpp &&
@@ -177,9 +227,9 @@ services:
   launch_franka:
     <<: *franka-overlay
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
-      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos franka.launch.py
       arm_id:=fr3 use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false} robot_ip:=${ROBOT_IP:-172.16.0.2} use_rviz:=True"
@@ -187,20 +237,57 @@ services:
   launch_dual_franka:
     <<: *franka-overlay
     command: >
-      bash -lc "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -lc "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
-      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos dual_franka.launch.py
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
       left_robot_ip:=${LEFT_ROBOT_IP:-172.16.1.2} right_robot_ip:=${RIGHT_ROBOT_IP:-172.16.0.2}"
 
+  launch_ur:
+    <<: *ur-overlay
+    container_name: crisp_controllers_demos_launch_ur
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos ur.launch.py
+      ur_type:=${UR_TYPE:-ur5e}
+      use_fake_hardware:=${UR_FAKE_HARDWARE:-false}
+      robot_ip:=${ROBOT_IP:-192.168.0.10}
+      use_rviz:=true"
+
+  # UR + Robotiq 2F-140 gripper. Defaults to ur7e; override with UR_TYPE / ROBOT_IP /
+  # UR_COM_PORT. The gripper needs the USB-to-RS485 device, exposed via the /dev mount.
+  launch_ur_gripper:
+    <<: *ur-overlay
+    container_name: crisp_controllers_demos_launch_ur_gripper
+    command: >
+      bash -lc "if [ '${UR_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${UR_COM_PORT:-/dev/ttyUSB0}; fi &&
+      source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos ur.launch.py
+      ur_type:=${UR_TYPE:-ur7e}
+      use_fake_hardware:=${UR_FAKE_HARDWARE:-false}
+      robot_ip:=${ROBOT_IP:-192.168.0.10}
+      use_gripper:=true
+      com_port:=${UR_COM_PORT:-/dev/ttyUSB0}
+      use_rviz:=true"
+
   launch_kinova:
     <<: *kinova-overlay
     command: >
-      bash -c "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
+      bash -c "source /opt/ros/humble/setup.bash &&
       source install/setup.bash &&
-      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos kinova_gen3.launch.py"
 
@@ -209,7 +296,7 @@ services:
     command: >
       bash -c "source /opt/ros/${ROS_DISTRO_ROBOTS:-jazzy}/setup.bash &&
       source install/setup.bash &&
-      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos iiwa.launch.py"
 
@@ -223,7 +310,7 @@ services:
     container_name: crisp_controllers_demos_realsense_left
     command: >
       bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
-      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-lo} &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch realsense2_camera rs_launch.py camera_name:=\${CAMERA_NAME:-left_wrist_camera} camera_namespace:=\${CAMERA_NAMESPACE:-left} ${SERIAL_NUMBER:+serial:=_${SERIAL_NUMBER}}"
 
