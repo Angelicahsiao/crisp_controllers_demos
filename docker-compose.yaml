@@ -335,7 +335,7 @@ services:
       camera_name:='env_cam' \
       camera_namespace:='env' \
       rgb_camera.color_profile:=1280x720x30 \
-      serial_no:=_017322073238"
+      serial_no:=_318443060864"
 
   launch_realsense_wrist_camera:
     <<: *realsense-cameras-overlay
@@ -349,7 +349,8 @@ services:
       ros2 launch realsense2_camera rs_launch.py \
       camera_name:='wrist_cam' \
       camera_namespace:='wrist' \
-      serial_no:=_230422272626"
+      rgb_camera.color_profile:=1280x720x30 \
+      serial_no:=_231323072536"
 
   launch_camera:
     <<: *usb-cameras-base
