@@ -322,5 +322,34 @@ services:
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch realsense2_camera rs_launch.py camera_name:=\${CAMERA_NAME:-right_wrist_camera} camera_namespace:=\${CAMERA_NAMESPACE:-right}"
 
+  launch_realsense_env_camera:
+    <<: *realsense-cameras-overlay
+    container_name: crisp_controllers_demos_realsense_env
+    # environment:
+    #   ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    command: >
+      bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
+      export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp &&
+      echo 'Using the serial number: $${SERIAL_NUMBER}' &&
+      ros2 launch realsense2_camera rs_launch.py \
+      camera_name:='env_cam' \
+      camera_namespace:='env' \
+      rgb_camera.color_profile:=1280x720x30 \
+      serial_no:=_017322073238"
+
+  launch_realsense_wrist_camera:
+    <<: *realsense-cameras-overlay
+    container_name: crisp_controllers_demos_realsense_wrist
+    # environment:
+    #   ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    command: >
+      bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
+      export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp &&
+      echo 'Using the serial number: $${SERIAL_NUMBER}' &&
+      ros2 launch realsense2_camera rs_launch.py \
+      camera_name:='wrist_cam' \
+      camera_namespace:='wrist' \
+      serial_no:=_230422272626"
+
   launch_camera:
     <<: *usb-cameras-base
