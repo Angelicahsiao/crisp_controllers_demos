@@ -334,7 +334,7 @@ services:
       ros2 launch realsense2_camera rs_launch.py \
       camera_name:='env_cam' \
       camera_namespace:='env' \
-      rgb_camera.color_profile:=848x480x15 \
+      rgb_camera.color_profile:=640x480x15 \
       enable_depth:=false \
       serial_no:=_332322073530"
 
@@ -350,7 +350,7 @@ services:
       ros2 launch realsense2_camera rs_launch.py \
       camera_name:='wrist_cam' \
       camera_namespace:='wrist' \
-      rgb_camera.color_profile:=848x480x15 \
+      rgb_camera.color_profile:=640x480x15 \
       enable_depth:=false \
       serial_no:=_218722270823"
 
