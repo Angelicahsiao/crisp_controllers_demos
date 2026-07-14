@@ -9,6 +9,9 @@
 
   <depend>xacro</depend>
   <depend>joint_state_publisher</depend>
+  <!-- external_effort_node: gravity-free joint effort via Pinocchio -->
+  <depend>pinocchio</depend>
+  <depend>python3-numpy</depend>
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
