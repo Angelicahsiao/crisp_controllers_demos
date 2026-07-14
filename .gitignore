@@ -1,1 +1,5 @@
 crisp_controllers
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
