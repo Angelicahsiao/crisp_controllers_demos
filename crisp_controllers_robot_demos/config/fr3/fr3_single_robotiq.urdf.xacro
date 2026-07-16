@@ -1,0 +1,59 @@
+<?xml version='1.0' encoding='utf-8'?>
+
+<!-- FR3 with a Robotiq 2F-140 on the flange instead of the Franka Hand.
+     Mirrors config/ur/ur_single_robotiq.urdf.xacro: the robotiq macro brings
+     its own ros2_control tag (serial driver on com_port), so the gripper joins
+     the same controller_manager as the arm. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fr3">
+
+  <xacro:include filename="$(find crisp_controllers_robot_demos)/config/fr3/fr3.urdf.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+
+  <xacro:arg name="no_prefix" default="false"/>
+  <xacro:arg name="with_sc" default="false" />
+  <xacro:arg name="robot_ip" default="172.16.0.2" />
+  <xacro:arg name="use_fake_hardware" default="false" />
+  <xacro:arg name="fake_sensor_commands" default="false" />
+  <xacro:arg name="gazebo" default="false" />
+  <xacro:arg name="gazebo_effort" default="true" />
+  <xacro:arg name="arm_prefix" default="" />
+  <xacro:arg name="has_camera" default="false" />
+
+  <!-- Serial device of the Robotiq USB-to-RS485 adapter. -->
+  <xacro:arg name="com_port" default="/dev/ttyUSB0" />
+
+  <xacro:property name="arm_prefix_modified" value="${'' if xacro.arg('arm_prefix') == '' else xacro.arg('arm_prefix') + '_'}" />
+
+  <!-- No Franka Hand: the Robotiq replaces it at the flange. -->
+  <xacro:fr3
+    arm_id="fr3"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    arm_prefix="$(arg arm_prefix)"
+    hand="false"
+  />
+
+  <!-- Mounted on the flange (fr3_link8). Adjust the origin to match your
+       coupling: the Franka Hand convention rotates the EE by -45 deg about Z,
+       and a coupling kit adds a Z offset. -->
+  <xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix="${arm_prefix_modified}"
+    parent="${arm_prefix_modified}fr3_link8"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    com_port="$(arg com_port)"
+    include_ros2_control="true">
+    <origin xyz="0 0 0" rpy="0 0 ${-pi/4}"/>
+  </xacro:robotiq_gripper>
+
+  <!-- TCP frame under the same name the Franka Hand provides, so the
+       controllers.yaml end_effector_frame works for both grippers.
+       0.24 m ~ flange to 2F-140 fingertips; adjust to your coupling. -->
+  <link name="${arm_prefix_modified}fr3_hand_tcp"/>
+  <joint name="${arm_prefix_modified}fr3_hand_tcp_joint" type="fixed">
+    <parent link="${arm_prefix_modified}fr3_link8"/>
+    <child link="${arm_prefix_modified}fr3_hand_tcp"/>
+    <origin xyz="0 0 0.24" rpy="0 0 ${-pi/4}"/>
+  </joint>
+
+</robot>

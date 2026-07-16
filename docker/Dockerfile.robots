@@ -206,7 +206,7 @@ FROM franka AS franka-overlay
 
 ARG CRISP_CONTROLLERS_VERSION=1.1.0
 
-# COPY . src/crisp_controllers_demos
+COPY . src/crisp_controllers_demos
 
 RUN git clone  --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
 RUN git clone https://github.com/danielsanjosepro/franka_broadcasters.git src/franka_broadcasters
@@ -222,7 +222,7 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
 FROM kinova AS kinova-overlay
