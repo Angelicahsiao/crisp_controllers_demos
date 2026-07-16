@@ -59,6 +59,31 @@ class ExternalEffortNode(Node):
         n = len(self._joint_names)
         scale = list(self.declare_parameter("scale", [1.0] * n).value)
         offset = list(self.declare_parameter("offset", [0.0] * n).value)
+
+        # A calibration YAML (written by calibrate_external_effort) overrides
+        # the scale/offset parameters.
+        calibration_file = self.declare_parameter("calibration_file", "").value
+        if calibration_file:
+            import yaml
+
+            with open(calibration_file) as f:
+                calib = yaml.safe_load(f)
+            scale = list(calib["scale"])
+            offset = list(calib["offset"])
+            calib_joints = calib.get("joint_names")
+            if calib_joints is not None and [
+                j.removeprefix(self._prefix) for j in calib_joints
+            ] != list(self._joint_names):
+                raise RuntimeError(
+                    f"calibration_file '{calibration_file}' was fitted for joints "
+                    f"{calib_joints}, but this node is configured for "
+                    f"{self._joint_names}."
+                )
+            self.get_logger().info(
+                f"Loaded calibration from '{calibration_file}' "
+                f"({calib.get('n_samples', '?')} samples)."
+            )
+
         for name, arr in (("scale", scale), ("offset", offset)):
             if len(arr) != n:
                 raise RuntimeError(f"'{name}' has {len(arr)} values but joint_names has {n}.")

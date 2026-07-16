@@ -24,6 +24,7 @@ def _launch_setup(context, *args, **kwargs):
     output_topic = LaunchConfiguration("output_topic").perform(context)
     joint_state_topic = LaunchConfiguration("joint_state_topic").perform(context)
     joint_names = ast.literal_eval(LaunchConfiguration("joint_names").perform(context))
+    calibration_file = LaunchConfiguration("calibration_file").perform(context)
 
     return [
         Node(
@@ -37,6 +38,7 @@ def _launch_setup(context, *args, **kwargs):
                     "joint_names": joint_names,
                     "output_topic": output_topic,
                     "joint_state_topic": joint_state_topic,
+                    "calibration_file": calibration_file,
                 }
             ],
         )
@@ -49,6 +51,12 @@ def generate_launch_description():
             DeclareLaunchArgument("namespace", default_value=""),
             DeclareLaunchArgument("output_topic", default_value="external_joint_effort"),
             DeclareLaunchArgument("joint_state_topic", default_value="joint_states"),
+            DeclareLaunchArgument(
+                "calibration_file",
+                default_value="",
+                description="YAML from calibrate_external_effort with per-joint "
+                "scale/offset; empty = uncalibrated (scale 1, offset 0).",
+            ),
             DeclareLaunchArgument(
                 "joint_names",
                 default_value="['shoulder_pan_joint','shoulder_lift_joint',"
