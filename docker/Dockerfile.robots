@@ -237,8 +237,13 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    # BOOST_MPL flags: pinocchio 3's joint variant has 25 types, above Boost.MPL's
+    # default 20-type limit; without these, consumers fail with
+    # "boost::variant ... has no member named 'storage_'" (pinocchio docs).
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30" \
+        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
 FROM kinova AS kinova-overlay
