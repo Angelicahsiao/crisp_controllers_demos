@@ -101,7 +101,9 @@ RUN git clone https://github.com/frankarobotics/franka_ros2.git -b $ROS_DISTRO s
     && if [ -d src/libfranka ]; then git -C src/libfranka submodule update --init --recursive; fi \
     # Guard every touch: directory layout differs across franka_ros2 versions
     && if [ -d src/franka_ros2/franka_gazebo ]; then touch src/franka_ros2/franka_gazebo/COLCON_IGNORE; fi \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    # BUILD_TESTS/BUILD_EXAMPLES=OFF: libfranka's tests need GTest::gmock
+    # imported targets that are unavailable here; not needed in a robot image.
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
     && touch src/franka_ros2/COLCON_IGNORE \
     && if [ -d src/franka_description ]; then touch src/franka_description/COLCON_IGNORE; fi \
     && if [ -d src/libfranka ]; then touch src/libfranka/COLCON_IGNORE; fi
