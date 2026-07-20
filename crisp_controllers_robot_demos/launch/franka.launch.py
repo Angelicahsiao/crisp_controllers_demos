@@ -67,20 +67,16 @@ def robot_description_dependent_nodes_spawner(
         "fr3",
         "fr3_single_robotiq.urdf.xacro" if use_gripper_bool else "fr3_single.urdf.xacro",
     )
+    # Only pass mappings the fr3 xacros actually declare as <xacro:arg>. Newer
+    # xacro rejects undeclared mappings ("Invalid parameter ..."); the fr3
+    # macro hardcodes arm_id/ros2_control and never reads mujoco_model, so
+    # those three (previously silently ignored) are dropped.
     xacro_mappings = {
-        "ros2_control": "true",
-        "arm_id": arm_id_str,
         "arm_prefix": arm_prefix_str,
         "robot_ip": robot_ip_str,
         "load_gripper": load_gripper_str,
         "use_fake_hardware": use_fake_hardware_str,
         "fake_sensor_commands": fake_sensor_commands_str,
-        "mujoco_model": os.path.join(
-            get_package_share_directory("crisp_controllers_robot_demos"),
-            "config",
-            "fr3",
-            "scene.xml",
-        ),
     }
     if use_gripper_bool:
         xacro_mappings["com_port"] = com_port_str
