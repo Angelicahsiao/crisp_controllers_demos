@@ -170,9 +170,12 @@ x-franka: &franka
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
-    RMW: ${RMW:-fastdds}
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
     ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
     ROS_DISTRO: ${ROS_DISTRO:-humble}
+    # kept for the RMW=fastdds fallback (host networking needs UDPv4-only)
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 x-franka-overlay: &franka-overlay
@@ -190,9 +193,12 @@ x-franka-overlay: &franka-overlay
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
-    RMW: ${RMW:-fastdds}
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
     ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
     ROS_DISTRO: ${ROS_DISTRO:-humble}
+    # kept for the RMW=fastdds fallback (host networking needs UDPv4-only)
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 
@@ -233,7 +239,7 @@ services:
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
-      RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos franka.launch.py
       arm_id:=fr3 use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false} robot_ip:=${ROBOT_IP:-172.16.0.2} use_rviz:=True"
 
@@ -249,7 +255,7 @@ services:
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
-      RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos franka.launch.py
       arm_id:=fr3
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
@@ -268,7 +274,7 @@ services:
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
-      RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos dual_franka.launch.py
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
       left_robot_ip:=${LEFT_ROBOT_IP:-172.16.1.2} right_robot_ip:=${RIGHT_ROBOT_IP:-172.16.0.2}"
