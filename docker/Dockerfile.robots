@@ -216,7 +216,11 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
 
 FROM franka AS franka-overlay
 
-ARG CRISP_CONTROLLERS_VERSION=1.1.0
+# 1.3.0 (not 1.1.0 like ur-overlay): v1.1.0 does not compile against the
+# pinocchio 3.x now shipped by humble apt (boost::variant storage_ errors);
+# late-2025 releases are CI-built against it. Stay on 1.x to keep the
+# controller parameter interface our fr3 controllers.yaml was written for.
+ARG CRISP_CONTROLLERS_VERSION=1.3.0
 
 COPY . src/crisp_controllers_demos
 
