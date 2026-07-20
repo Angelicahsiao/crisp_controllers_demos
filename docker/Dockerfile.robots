@@ -86,9 +86,12 @@ FROM base AS franka
 RUN git clone https://github.com/frankarobotics/franka_ros2.git -b $ROS_DISTRO src/franka_ros2 \
     && source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt-get update \
-    && if [ -f src/franka_ros2/franka.repos ]; then \
-         vcs import src < src/franka_ros2/franka.repos --recursive --skip-existing; \
-       fi \
+    # franka_ros2 renamed franka.repos -> dependency.repos; import whichever exists
+    && for repos in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
+         if [ -f "$repos" ]; then \
+           vcs import src < "$repos" --recursive --skip-existing; \
+         fi; \
+       done \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y \
     && touch src/franka_ros2/franka_gazebo/COLCON_IGNORE \
