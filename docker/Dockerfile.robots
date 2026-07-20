@@ -94,6 +94,11 @@ RUN git clone https://github.com/frankarobotics/franka_ros2.git -b $ROS_DISTRO s
        done \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y \
+    # libfranka: console_bridge is required by its CMake but missing from its
+    # package.xml (rosdep never installs it); submodules (common/) are required
+    # by add_subdirectory and may not survive the vcs import.
+    && sudo apt-get install -y libconsole-bridge-dev \
+    && if [ -d src/libfranka ]; then git -C src/libfranka submodule update --init --recursive; fi \
     # Guard every touch: directory layout differs across franka_ros2 versions
     && if [ -d src/franka_ros2/franka_gazebo ]; then touch src/franka_ros2/franka_gazebo/COLCON_IGNORE; fi \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
