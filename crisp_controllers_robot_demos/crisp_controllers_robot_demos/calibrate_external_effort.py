@@ -172,7 +172,18 @@ class CalibrateExternalEffort(Node):
         q = np.array([msg.position[i] for i in self._msg_index])
         tau = np.array([msg.effort[i] for i in self._msg_index])
         if np.isnan(tau).any() or np.isnan(q).any():
-            return  # skip samples with NaN (e.g. a joint not reporting effort)
+            bad = [
+                self._model_joint_names[j]
+                for j in range(len(tau))
+                if np.isnan(tau[j]) or np.isnan(q[j])
+            ]
+            self.get_logger().warning(
+                f"Skipping sample: NaN effort/position on {bad}. This arm joint "
+                "is not reporting a valid value — calibration cannot proceed "
+                "until the driver publishes it.",
+                throttle_duration_sec=5.0,
+            )
+            return  # a NaN on any recorded joint would poison the fit
         self._qs.append(q)
         self._taus.append(tau)
         self._gravity.append(self._estimator.gravity_effort(q))
