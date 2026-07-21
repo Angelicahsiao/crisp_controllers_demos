@@ -3,25 +3,47 @@
 The UR's current-derived effort has per-joint scale errors and static offsets,
 so pure gravity subtraction (scale=1, offset=0) leaves a pose-dependent
 residual. This script records (q, tau_measured) while the arm moves slowly
-with NOTHING touching it, fits tau_measured ~ scale * g(q) + offset per joint
-(ExternalEffortEstimator.fit_calibration), and writes the result to a YAML
-that external_effort_node loads via its 'calibration_file' parameter.
+with NOTHING touching it, fits tau_measured ~ scale * g(q) + offset per joint,
+and writes the result to a YAML that external_effort_node loads via its
+'calibration_file' parameter.
 
-Usage (move the arm through diverse poses during recording, e.g. freedrive or
-slow teleop — the more the shoulder/elbow travel, the better the fit):
+Recording stops when you press ENTER (default) or after 'duration' seconds as a
+safety cap. During recording the node prints, per joint, how much the gravity
+torque has varied so far ("span") — KEEP MOVING each joint until its span is
+large (several Nm) or it is flagged as physically unexciteable.
+
+WHAT A GOOD RECORDING NEEDS (gravity must load each joint differently across
+the samples, or its scale cannot be identified):
+    - shoulder_lift : raise/lower the whole arm, horizontal -> up -> down.
+    - elbow         : fully fold and fully extend the elbow.
+    - wrist_1       : pitch the wrist up and down.
+    - wrist_2       : ROLL the wrist so its axis tilts between vertical and
+                      horizontal (otherwise its gravity span stays ~0).
+    - shoulder_pan and wrist_3 rotate about near-vertical axes: gravity barely
+      loads them in ANY pose, so their scale is physically unidentifiable. The
+      script detects this (span below --min_span) and keeps scale=1.0 for them,
+      fitting only the offset. This is expected, not an error.
+
+Usage (UR7e example):
 
     ros2 run crisp_controllers_robot_demos calibrate_external_effort \\
         --ros-args -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, \\
         elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \\
-        -p duration:=30.0 -p output_file:=external_effort_calibration.yaml
+        -p output_file:=external_effort_calibration.yaml
 
 Parameters:
     joint_names (string[])   REQUIRED — actuated arm joints, in order.
-    duration (double)        recording time in seconds (default 30).
-    sample_rate (double)     sampling rate in Hz (default 20).
+    stop_on_key (bool)       stop when ENTER is pressed (default True).
+    duration (double)        max recording seconds / safety cap (default 120).
+    sample_rate (double)     sampling rate in Hz (default 5).
+    min_span (double)        gravity span (Nm) below which a joint's scale is
+                             left at 1.0 and only its offset is fit (default 1).
     output_file (str)        YAML path (default external_effort_calibration.yaml).
     joint_state_topic (str)  default "joint_states".
 """
+
+import sys
+import threading
 
 import numpy as np
 import rclpy
@@ -48,8 +70,10 @@ class CalibrateExternalEffort(Node):
         ]
         if not self._joint_names:
             raise RuntimeError("calibrate_external_effort requires 'joint_names'.")
-        self._duration = self.declare_parameter("duration", 30.0).value
-        self._sample_rate = self.declare_parameter("sample_rate", 20.0).value
+        self._stop_on_key = self.declare_parameter("stop_on_key", True).value
+        self._duration = self.declare_parameter("duration", 120.0).value
+        self._sample_rate = self.declare_parameter("sample_rate", 5.0).value
+        self._min_span = self.declare_parameter("min_span", 1.0).value
         self._output_file = self.declare_parameter(
             "output_file", "external_effort_calibration.yaml"
         ).value
@@ -61,9 +85,12 @@ class CalibrateExternalEffort(Node):
         self._last_msg: JointState | None = None
         self._msg_index: list[int] | None = None
         self._model_joint_names: list[str] | None = None
+        self._estimator: ExternalEffortEstimator | None = None
         self._qs: list[np.ndarray] = []
         self._taus: list[np.ndarray] = []
+        self._gravity: list[np.ndarray] = []
         self._started = False
+        self._stop_requested = False
         self.done = False
 
         self.create_subscription(
@@ -76,13 +103,28 @@ class CalibrateExternalEffort(Node):
             JointState, joint_state_topic, self._on_joint_state, qos_profile_sensor_data
         )
         self._timer = self.create_timer(1.0 / self._sample_rate, self._sample)
+        if self._stop_on_key:
+            threading.Thread(target=self._wait_for_key, daemon=True).start()
 
         self.get_logger().info(
-            f"Waiting for /robot_description and '{joint_state_topic}'... "
-            f"Will record {self._duration:.0f}s of contact-free motion. "
-            "Move the arm slowly through diverse poses; do NOT touch the arm "
-            "with anything other than the leader/freedrive."
+            f"Waiting for /robot_description and '{joint_state_topic}'...\n"
+            "  Move the arm SLOWLY through diverse poses, nothing touching it:\n"
+            "    shoulder_lift: raise/lower the arm | elbow: fold/extend\n"
+            "    wrist_1: pitch up/down | wrist_2: ROLL so its axis tilts\n"
+            "  (shoulder_pan / wrist_3 can't be gravity-excited — that's fine.)\n"
+            + (
+                "  Press ENTER to stop and fit.\n"
+                if self._stop_on_key
+                else f"  Recording for {self._duration:.0f}s.\n"
+            )
         )
+
+    def _wait_for_key(self) -> None:
+        try:
+            sys.stdin.readline()
+        except Exception:  # noqa: BLE001 (stdin may be closed under some launchers)
+            return
+        self._stop_requested = True
 
     def _on_urdf(self, msg: String) -> None:
         self._urdf = msg.data
@@ -121,52 +163,82 @@ class CalibrateExternalEffort(Node):
 
         if not self._started:
             self._started = True
-            self._n_samples = int(self._duration * self._sample_rate)
-            self.get_logger().info(
-                f"Recording started: {self._n_samples} samples at "
-                f"{self._sample_rate:.0f} Hz. Move the arm now."
+            self._estimator = ExternalEffortEstimator(
+                self._urdf, self._model_joint_names
             )
+            self._start_time = self.get_clock().now()
+            self.get_logger().info("Recording started. Move the arm now.")
 
-        self._qs.append(np.array([msg.position[i] for i in self._msg_index]))
-        self._taus.append(np.array([msg.effort[i] for i in self._msg_index]))
+        q = np.array([msg.position[i] for i in self._msg_index])
+        tau = np.array([msg.effort[i] for i in self._msg_index])
+        if np.isnan(tau).any() or np.isnan(q).any():
+            return  # skip samples with NaN (e.g. a joint not reporting effort)
+        self._qs.append(q)
+        self._taus.append(tau)
+        self._gravity.append(self._estimator.gravity_effort(q))
+
+        # Live diversity feedback: current gravity span per joint.
         n = len(self._qs)
-        if n % int(5 * self._sample_rate) == 0:
-            self.get_logger().info(f"{n}/{self._n_samples} samples...")
-        if n >= self._n_samples:
+        if n % int(3 * self._sample_rate) == 0:
+            grav = np.stack(self._gravity)
+            spans = np.ptp(grav, axis=0)
+            report = "  ".join(
+                f"{name.replace(self._prefix, '')}:{spans[j]:.1f}"
+                f"{'OK' if spans[j] >= self._min_span else '..'}"
+                for j, name in enumerate(self._model_joint_names)
+            )
+            self.get_logger().info(f"[{n} samples] gravity span Nm  {report}")
+
+        elapsed = (self.get_clock().now() - self._start_time).nanoseconds / 1e9
+        if self._stop_requested or elapsed >= self._duration:
+            if n < 10:
+                self.get_logger().warning(
+                    f"Only {n} samples — record longer before stopping."
+                )
+                self._stop_requested = False
+                return
             self._fit_and_save()
             self.done = True
 
     def _fit_and_save(self) -> None:
-        estimator = ExternalEffortEstimator(self._urdf, self._model_joint_names)
         qs = np.stack(self._qs)
         taus = np.stack(self._taus)
+        gravity = np.stack(self._gravity)
+        spans = np.ptp(gravity, axis=0)
 
-        # Warn if a joint barely changed its gravity torque during recording —
-        # its scale fit is then poorly conditioned (offset still fine).
-        gravity = np.stack([estimator.gravity_effort(q) for q in qs])
+        n = len(self._model_joint_names)
+        scale = np.ones(n)
+        offset = np.zeros(n)
         for j, name in enumerate(self._model_joint_names):
-            span = float(np.ptp(gravity[:, j]))
-            if span < 1.0:
+            if spans[j] >= self._min_span:
+                # well-excited: joint least-squares fit tau ~ a*g + b
+                A = np.stack([gravity[:, j], np.ones(len(qs))], axis=1)
+                (a, b), *_ = np.linalg.lstsq(A, taus[:, j], rcond=None)
+                scale[j], offset[j] = a, b
+            else:
+                # unidentifiable scale (near-constant gravity): keep scale=1,
+                # fit only the offset so we don't invent a garbage gain.
+                scale[j] = 1.0
+                offset[j] = float(np.mean(taus[:, j] - gravity[:, j]))
                 self.get_logger().warning(
-                    f"'{name}': gravity torque only spanned {span:.2f} Nm during "
-                    "recording — move it through more diverse poses for a "
-                    "better scale fit."
+                    f"'{name}': gravity span {spans[j]:.2f} Nm < {self._min_span} "
+                    "— scale left at 1.0, only offset fit (expected for "
+                    "pan/wrist_3, or move this joint more)."
                 )
 
-        scale, offset = estimator.fit_calibration(qs, taus)
         residual = taus - (scale * gravity + offset)
         rms = np.sqrt((residual**2).mean(axis=0))
-
         for j, name in enumerate(self._model_joint_names):
             self.get_logger().info(
                 f"{name}: scale={scale[j]:+.3f} offset={offset[j]:+.3f} "
-                f"residual_rms={rms[j]:.3f} Nm"
+                f"span={spans[j]:.2f}Nm residual_rms={rms[j]:.3f}Nm"
             )
 
         data = {
             "joint_names": list(self._model_joint_names),
             "scale": [round(float(v), 6) for v in scale],
             "offset": [round(float(v), 6) for v in offset],
+            "gravity_span": [round(float(v), 4) for v in spans],
             "residual_rms": [round(float(v), 6) for v in rms],
             "n_samples": int(len(qs)),
         }

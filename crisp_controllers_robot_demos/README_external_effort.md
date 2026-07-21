@@ -54,22 +54,39 @@ Pure gravity subtraction leaves a pose-dependent residual of a few Nm because
 the UR's current-derived effort has per-joint scale errors. A one-time
 calibration removes most of it.
 
-**1. Record and fit** (~30 s). Move the arm slowly through diverse poses —
-freedrive or slow teleop — with **nothing touching it**. Exercise
-`shoulder_lift` and `elbow` through high and low poses especially: the fit
-needs the gravity torque to vary.
+**1. Record and fit.** Recording stops when you press **ENTER** (or after
+`duration` seconds as a safety cap). `joint_names` is **required**. Example for
+a UR arm:
 
 ```bash
 ros2 run crisp_controllers_robot_demos calibrate_external_effort \
-  --ros-args -p output_file:=/path/to/external_effort_calibration.yaml
+  --ros-args \
+  -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \
+  -p output_file:=/home/ros/ros2_ws/src/crisp_controllers_demos/external_effort_calibration.yaml
 ```
 
-The script prints per-joint `scale`, `offset` and `residual_rms` (roughly the
-noise floor of your estimate, typically 0.5–1.5 Nm after calibration) and
-warns if a joint's gravity torque barely changed during recording — move that
-joint through more poses and re-run. Joints that hardly fight gravity
-(`shoulder_pan`, `wrist_3` in many poses) will always trigger this warning;
-that is expected and harmless since their gravity torque is near zero.
+Move the arm slowly with **nothing touching it**. The fit can only identify a
+joint's scale if **gravity loads that joint differently across the poses you
+record** — so you must actively drive each joint through motions that change
+its gravity torque:
+
+| Joint | Motion needed for a good fit |
+|---|---|
+| `shoulder_lift` | raise/lower the whole arm: horizontal → up → down |
+| `elbow` | fully fold and fully extend the elbow |
+| `wrist_1` | pitch the wrist up and down |
+| `wrist_2` | **roll** the wrist so its axis tilts between vertical and horizontal |
+| `shoulder_pan`, `wrist_3` | rotate about near-vertical axes — gravity barely loads them in **any** pose, so their scale is **physically unidentifiable**; the script keeps `scale=1.0` and fits only their offset. Expected, not an error. |
+
+While recording, the node prints a live **gravity span** per joint
+(`shoulder_lift:4.2OK  elbow:0.3..`). Keep moving a joint until its span is
+several Nm (`OK`); `..` means it still needs more excitation. A span below
+`min_span` (default 1 Nm) at the end means that joint's scale is left at 1.0.
+
+The final report prints per-joint `scale`, `offset`, `gravity_span` and
+`residual_rms` (roughly the noise floor of your estimate — typically 0.5–1.5 Nm
+after a good calibration; a much larger value means that joint was poorly
+excited or friction-dominated).
 
 **2. Launch the node with the calibration:**
 
@@ -105,19 +122,22 @@ prefix in, the un-prefixed names are used as a fallback.
 | Parameter | Default | Description |
 |---|---|---|
 | `joint_names` | — | Same as the node. **Required** (has a UR default in the node only). |
-| `duration` | `30.0` | Recording time in seconds. |
-| `sample_rate` | `20.0` | Sampling rate in Hz. |
+| `stop_on_key` | `True` | Stop recording when ENTER is pressed. |
+| `duration` | `120.0` | Max recording seconds / safety cap when `stop_on_key`. |
+| `sample_rate` | `5.0` | Sampling rate in Hz. |
+| `min_span` | `1.0` | Gravity span (Nm) below which a joint's scale is left at 1.0 and only its offset is fit. |
 | `output_file` | `external_effort_calibration.yaml` | Where to write the fit. |
 | `joint_state_topic` | `joint_states` | Source topic. |
 
 Calibration YAML format:
 
 ```yaml
-joint_names: [shoulder_pan_joint, ...]
-scale:       [1.043, ...]   # per-joint gain a
-offset:      [-0.31, ...]   # per-joint offset b  [Nm]
-residual_rms: [0.7, ...]    # fit quality per joint [Nm]
-n_samples: 600
+joint_names:  [shoulder_pan_joint, ...]
+scale:        [1.043, ...]   # per-joint gain a (1.0 if span < min_span)
+offset:       [-0.31, ...]   # per-joint offset b  [Nm]
+gravity_span: [0.0, ...]     # how much gravity torque varied while recording [Nm]
+residual_rms: [0.7, ...]     # fit quality per joint [Nm]
+n_samples: 240
 ```
 
 ## Limitations
