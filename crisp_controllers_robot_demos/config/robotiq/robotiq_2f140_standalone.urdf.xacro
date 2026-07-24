@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+
+<!-- Standalone Robotiq 2F-140: the gripper on its OWN ros2_control system,
+     independent of the franka arm. franka_hardware enforces all-7-joints
+     position mode and counts any position command interface in its controller
+     manager, so the Robotiq's finger_joint cannot live in franka's
+     controller_manager. Running it here (separate controller_manager) keeps the
+     gripper fully functional without tripping franka's mode-switch check. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robotiq_2f140">
+
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+
+  <xacro:arg name="use_fake_hardware" default="false"/>
+  <xacro:arg name="com_port" default="/dev/ttyUSB0"/>
+
+  <link name="world"/>
+
+  <xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix=""
+    parent="world"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    com_port="$(arg com_port)"
+    include_ros2_control="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+
+</robot>
