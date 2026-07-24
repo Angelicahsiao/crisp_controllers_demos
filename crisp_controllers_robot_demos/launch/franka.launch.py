@@ -331,7 +331,14 @@ def generate_launch_description():
             Node(
                 package="controller_manager",
                 executable="spawner",
-                arguments=["robotiq_gripper_controller"],
+                # DIAGNOSTIC: spawn inactive. franka_hardware 1.0.0 rejects a
+                # partial position-interface start ("Expected 7, given 1"); the
+                # Robotiq gripper_controller claims finger_joint position in the
+                # shared controller_manager, which trips franka's all-7-joints
+                # position-mode check. Inactive means it doesn't claim at
+                # bringup — if the arm then comes up, the gripper controller is
+                # confirmed as the trigger (real fix: separate controller_manager).
+                arguments=["robotiq_gripper_controller", "--inactive"],
                 output="screen",
                 condition=IfCondition(use_gripper),
             ),
