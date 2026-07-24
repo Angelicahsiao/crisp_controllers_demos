@@ -98,7 +98,7 @@ def robot_description_dependent_nodes_spawner(
         ]
     )
 
-    return [
+    nodes = [
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -122,6 +122,40 @@ def robot_description_dependent_nodes_spawner(
             on_exit=Shutdown(),
         ),
     ]
+
+    # Robotiq 2F-140 on its OWN controller_manager (node name
+    # robotiq_controller_manager) so it never enters franka's controller_manager
+    # (franka_hardware rejects a single finger position interface). Controllers
+    # stay at root namespace -> crisp_py reaches /robotiq_gripper_controller
+    # unchanged. The franka URDF carries the Robotiq visual only
+    # (include_ros2_control=false); this node owns the RS485 hardware.
+    if use_gripper_bool:
+        pkg = get_package_share_directory("crisp_controllers_robot_demos")
+        robotiq_description = xacro.process_file(
+            os.path.join(pkg, "config", "robotiq", "robotiq_2f140_standalone.urdf.xacro"),
+            mappings={"com_port": com_port_str, "use_fake_hardware": use_fake_hardware_str},
+        ).toprettyxml(indent="  ")
+        robotiq_controllers = os.path.join(
+            pkg, "config", "robotiq", "robotiq_standalone_controllers.yaml"
+        )
+        cm = "robotiq_controller_manager"
+        nodes += [
+            Node(
+                package="controller_manager",
+                executable="ros2_control_node",
+                name=cm,
+                parameters=[{"robot_description": robotiq_description}, robotiq_controllers],
+                remappings=[("joint_states", "robotiq/joint_states")],
+                output="screen",
+            ),
+            Node(package="controller_manager", executable="spawner",
+                 arguments=["robotiq_joint_state_broadcaster", "-c", cm], output="screen"),
+            Node(package="controller_manager", executable="spawner",
+                 arguments=["robotiq_activation_controller", "-c", cm], output="screen"),
+            Node(package="controller_manager", executable="spawner",
+                 arguments=["robotiq_gripper_controller", "-c", cm], output="screen"),
+        ]
+    return nodes
 
 
 def generate_launch_description():
@@ -313,35 +347,9 @@ def generate_launch_description():
                     AndSubstitution(load_gripper, NotSubstitution(use_gripper))
                 ),
             ),
-            # Robotiq 2F-140 controllers (only when use_gripper:=true)
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                arguments=["robotiq_joint_state_broadcaster"],
-                output="screen",
-                condition=IfCondition(use_gripper),
-            ),
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                arguments=["robotiq_activation_controller"],
-                output="screen",
-                condition=IfCondition(use_gripper),
-            ),
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                # DIAGNOSTIC: spawn inactive. franka_hardware 1.0.0 rejects a
-                # partial position-interface start ("Expected 7, given 1"); the
-                # Robotiq gripper_controller claims finger_joint position in the
-                # shared controller_manager, which trips franka's all-7-joints
-                # position-mode check. Inactive means it doesn't claim at
-                # bringup — if the arm then comes up, the gripper controller is
-                # confirmed as the trigger (real fix: separate controller_manager).
-                arguments=["robotiq_gripper_controller", "--inactive"],
-                output="screen",
-                condition=IfCondition(use_gripper),
-            ),
+            # Robotiq controllers are spawned on their own controller_manager
+            # (robotiq_controller_manager) in the description-dependent spawner
+            # above — NOT here in franka's controller_manager.
             Node(
                 package="rviz2",
                 executable="rviz2",

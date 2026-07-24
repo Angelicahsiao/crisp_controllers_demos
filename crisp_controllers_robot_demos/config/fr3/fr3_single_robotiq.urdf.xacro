@@ -36,13 +36,18 @@
   <!-- Mounted on the flange (fr3_link8). Adjust the origin to match your
        coupling: the Franka Hand convention rotates the EE by -45 deg about Z,
        and a coupling kit adds a Z offset. -->
+  <!-- include_ros2_control="false": the Robotiq is VISUAL-only in the franka
+       URDF (links/TF). Its control lives on a SEPARATE /robotiq
+       controller_manager (robotiq_2f140_standalone.urdf.xacro), because
+       franka_hardware rejects a single finger position interface in franka's
+       controller_manager ("Expected 7, given 1"). -->
   <xacro:robotiq_gripper
     name="RobotiqGripperHardwareInterface"
     prefix="${arm_prefix_modified}"
     parent="${arm_prefix_modified}fr3_link8"
     use_fake_hardware="$(arg use_fake_hardware)"
     com_port="$(arg com_port)"
-    include_ros2_control="true">
+    include_ros2_control="false">
     <origin xyz="0 0 0" rpy="0 0 ${-pi/4}"/>
   </xacro:robotiq_gripper>
 

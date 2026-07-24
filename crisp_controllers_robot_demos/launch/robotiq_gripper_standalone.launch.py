@@ -34,29 +34,31 @@ def _setup(context, *args, **kwargs):
         urdf, mappings={"com_port": com_port, "use_fake_hardware": use_fake_hardware}
     ).toprettyxml(indent="  ")
 
+    cm = "robotiq_controller_manager"
     nodes = [
         Node(
             package="controller_manager",
             executable="ros2_control_node",
+            name=cm,
             parameters=[{"robot_description": robot_description}, controllers],
             output="screen",
         ),
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["robotiq_joint_state_broadcaster"],
+            arguments=["robotiq_joint_state_broadcaster", "-c", cm],
             output="screen",
         ),
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["robotiq_activation_controller"],
+            arguments=["robotiq_activation_controller", "-c", cm],
             output="screen",
         ),
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["robotiq_gripper_controller"],
+            arguments=["robotiq_gripper_controller", "-c", cm],
             output="screen",
         ),
     ]

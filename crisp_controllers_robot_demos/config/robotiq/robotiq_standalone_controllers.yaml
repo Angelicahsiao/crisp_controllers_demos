@@ -2,7 +2,11 @@
 # Same controller set and params as the UR integration's robotiq entries, so
 # crisp_py's Gripper talks to /robotiq_gripper_controller/gripper_cmd exactly
 # as before.
-controller_manager:
+# Node name is robotiq_controller_manager (NOT the default controller_manager)
+# so it can run alongside franka's controller_manager without a node-name
+# clash. The controllers themselves stay at root namespace, so crisp_py still
+# reaches /robotiq_gripper_controller/gripper_cmd.
+robotiq_controller_manager:
   ros__parameters:
     update_rate: 100  # Hz
 
