@@ -26,7 +26,7 @@ def _setup(context, *args, **kwargs):
     use_rsp = LaunchConfiguration("use_robot_state_publisher").perform(context)
 
     pkg = get_package_share_directory("crisp_controllers_robot_demos")
-    urdf = os.path.join(pkg, "config", "robotiq", "robotiq_2f140_standalone.urdf.xacro")
+    urdf = os.path.join(pkg, "config", "robotiq", "robotiq_2f85_standalone.urdf.xacro")
     controllers = os.path.join(
         pkg, "config", "robotiq", "robotiq_standalone_controllers.yaml"
     )

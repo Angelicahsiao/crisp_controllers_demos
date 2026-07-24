@@ -1,13 +1,13 @@
 <?xml version='1.0' encoding='utf-8'?>
 
-<!-- FR3 with a Robotiq 2F-140 on the flange instead of the Franka Hand.
-     Mirrors config/ur/ur_single_robotiq.urdf.xacro: the robotiq macro brings
-     its own ros2_control tag (serial driver on com_port), so the gripper joins
-     the same controller_manager as the arm. -->
+<!-- FR3 with a Robotiq 2F-85 on the flange instead of the Franka Hand.
+     The Robotiq is VISUAL-only here (include_ros2_control=false); its control
+     runs on a separate controller_manager (robotiq_2f85_standalone.urdf.xacro)
+     because franka_hardware rejects a single finger position interface. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fr3">
 
   <xacro:include filename="$(find crisp_controllers_robot_demos)/config/fr3/fr3.urdf.xacro"/>
-  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_140_macro.urdf.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
 
   <xacro:arg name="no_prefix" default="false"/>
   <xacro:arg name="with_sc" default="false" />
@@ -51,14 +51,25 @@
     <origin xyz="0 0 0" rpy="0 0 ${-pi/4}"/>
   </xacro:robotiq_gripper>
 
-  <!-- TCP frame under the same name the Franka Hand provides, so the
-       controllers.yaml end_effector_frame works for both grippers.
-       0.24 m ~ flange to 2F-140 fingertips; adjust to your coupling. -->
+  <!-- Robotiq 2F-85 TCP: 0.1025 m along the approach axis (Z) from the gripper
+       base (matches the measured ~0.103 m). The base's internal +90 deg
+       clocking is part of the macro, so it is inherited here. This recreates
+       the deploy-side robotiq_gripper_tcp frame, which the stock 2F-85 macro
+       does not provide. -->
+  <link name="${arm_prefix_modified}robotiq_gripper_tcp"/>
+  <joint name="${arm_prefix_modified}robotiq_gripper_tcp_joint" type="fixed">
+    <parent link="${arm_prefix_modified}robotiq_85_base_link"/>
+    <child link="${arm_prefix_modified}robotiq_gripper_tcp"/>
+    <origin xyz="0 0 0.1025" rpy="0 0 0"/>
+  </joint>
+  <!-- crisp_controllers CIC (controllers.yaml end_effector_frame) and crisp_py
+       (RobotConfig.target_frame) both use fr3_hand_tcp; make it coincident with
+       the gripper TCP so the control frame is explicit, not a fallback. -->
   <link name="${arm_prefix_modified}fr3_hand_tcp"/>
   <joint name="${arm_prefix_modified}fr3_hand_tcp_joint" type="fixed">
-    <parent link="${arm_prefix_modified}fr3_link8"/>
+    <parent link="${arm_prefix_modified}robotiq_gripper_tcp"/>
     <child link="${arm_prefix_modified}fr3_hand_tcp"/>
-    <origin xyz="0 0 0.24" rpy="0 0 ${-pi/4}"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
 </robot>

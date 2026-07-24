@@ -58,7 +58,7 @@ def robot_description_dependent_nodes_spawner(
     com_port_str = context.perform_substitution(com_port)
     use_gripper_bool = use_gripper_str.lower() in ("true", "1", "yes")
 
-    # use_gripper selects the Robotiq 2F-140 variant (which replaces the
+    # use_gripper selects the Robotiq 2F-85 variant (which replaces the
     # Franka Hand at the flange); otherwise the plain arm, with the Franka
     # Hand governed by load_gripper.
     franka_xacro_filepath = os.path.join(
@@ -123,7 +123,7 @@ def robot_description_dependent_nodes_spawner(
         ),
     ]
 
-    # Robotiq 2F-140 on its OWN controller_manager (node name
+    # Robotiq 2F-85 on its OWN controller_manager (node name
     # robotiq_controller_manager) so it never enters franka's controller_manager
     # (franka_hardware rejects a single finger position interface). Controllers
     # stay at root namespace -> crisp_py reaches /robotiq_gripper_controller
@@ -132,7 +132,7 @@ def robot_description_dependent_nodes_spawner(
     if use_gripper_bool:
         pkg = get_package_share_directory("crisp_controllers_robot_demos")
         robotiq_description = xacro.process_file(
-            os.path.join(pkg, "config", "robotiq", "robotiq_2f140_standalone.urdf.xacro"),
+            os.path.join(pkg, "config", "robotiq", "robotiq_2f85_standalone.urdf.xacro"),
             mappings={"com_port": com_port_str, "use_fake_hardware": use_fake_hardware_str},
         ).toprettyxml(indent="  ")
         robotiq_controllers = os.path.join(
