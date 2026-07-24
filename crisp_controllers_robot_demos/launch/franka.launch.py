@@ -349,11 +349,17 @@ def generate_launch_description():
                 arguments=["--display-config", rviz_file],
                 condition=IfCondition(use_rviz),
             ),
+            # Franka Hand adapter — only for the Franka Hand, not the Robotiq.
+            # It waits on the franka_gripper action server, which doesn't exist
+            # with use_gripper:=true, so it must not run there.
             Node(
                 package="crisp_controllers_robot_demos",
                 executable="crisp_py_franka_hand_adapter",
                 name="crisp_py_franka_hand_adapter",
                 output="screen",
+                condition=IfCondition(
+                    AndSubstitution(load_gripper, NotSubstitution(use_gripper))
+                ),
             ),
         ]
     )
