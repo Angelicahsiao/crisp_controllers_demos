@@ -19,16 +19,20 @@
              "
     >
   <xacro:property name="arm_prefix_modified" value="${'' if arm_prefix == '' else arm_prefix + '_'}" />
-  <!-- franka_description 2.8.1 franka_robot signature: arm_id -> robot_type,
-       and the macro now loads joint_limits/inertials/kinematics/dynamics
-       internally from robot_type. Hardware params (robot_ip, use_fake_hardware,
-       ros2_control, ...) are no longer accepted here — our own
-       franka_arm_ros2_control macro below provides the ros2_control block. -->
-  <xacro:franka_robot robot_type="${arm_id}"
+  <xacro:franka_robot arm_id="${arm_id}"
+                      joint_limits="${xacro.load_yaml('$(find franka_description)/robots/fr3/joint_limits.yaml')}"
+                      inertials="${xacro.load_yaml('$(find franka_description)/robots/fr3/inertials.yaml')}"
+                      kinematics="${xacro.load_yaml('$(find franka_description)/robots/fr3/kinematics.yaml')}"
+                      dynamics="${xacro.load_yaml('$(find franka_description)/robots/fr3/dynamics.yaml')}"
                       gazebo="${gazebo}"
                       hand="${hand}"
                       ee_id="${ee_id}"
                       with_sc="${with_sc}"
+                      ros2_control="false"
+                      robot_ip="${robot_ip}"
+                      use_fake_hardware="${use_fake_hardware}"
+                      fake_sensor_commands="${fake_sensor_commands}"
+                      gazebo_effort="${gazebo_effort}"
                       no_prefix="${no_prefix}"
                       arm_prefix="${arm_prefix}"
                       connected_to="${arm_prefix_modified}base">

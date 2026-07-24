@@ -178,9 +178,20 @@ x-franka: &franka
     # kept for the RMW=fastdds fallback (host networking needs UDPv4-only)
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
+# PATH B (server-9 robot, FR3 system 5.8.0): the franka services run the
+# PRESERVED server-9 image (libfranka 0.15.0 / franka_ros2 1.0.0 /
+# franka_description 0.4.0), which matches this robot's FCI server version 9.
+# The current Dockerfile builds the server-10 stack (libfranka 0.20), which
+# CANNOT talk to a server-9 robot, so we do NOT rebuild here.
+#   Default image: crisp_controllers_demos:franka-overlay-server9 (tag the
+#   old image once: docker tag <old_id> crisp_controllers_demos:franka-overlay-server9)
+#   Override with FRANKA_IMAGE=... to use a different build.
+# WARNING: do NOT run `docker compose build franka-overlay` / `up --build` on
+# these services — it would rebuild the server-10 stack and overwrite the
+# preserved server-9 image. Plain `docker compose up` reuses the image and is safe.
 x-franka-overlay: &franka-overlay
   <<: *base
-  image: crisp_controllers_demos:franka-overlay
+  image: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-overlay-server9}
   build:
     context: .
     dockerfile: docker/Dockerfile.robots

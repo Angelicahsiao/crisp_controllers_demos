@@ -23,9 +23,7 @@
 
           <xacro:unless value="${use_fake_hardware}">
             <plugin>franka_hardware/FrankaHardwareInterface</plugin>
-            <!-- franka_hardware 2.8.1 requires ros2_control interface major
-                 version 1; 0.1.0 was for the old franka_ros2 (libfranka 0.13). -->
-            <param name="version">1.0.0</param>
+            <param name="version">0.1.0</param>
             <param name="robot_ip">${robot_ip}</param>
             <param name="arm_prefix">${arm_prefix}</param>
           </xacro:unless>
