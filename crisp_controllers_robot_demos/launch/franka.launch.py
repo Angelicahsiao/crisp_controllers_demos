@@ -138,22 +138,21 @@ def robot_description_dependent_nodes_spawner(
         robotiq_controllers = os.path.join(
             pkg, "config", "robotiq", "robotiq_standalone_controllers.yaml"
         )
-        cm = "robotiq_controller_manager"
+        ns = "robotiq_2f85"
         nodes += [
             Node(
                 package="controller_manager",
                 executable="ros2_control_node",
-                name=cm,
+                namespace=ns,
                 parameters=[{"robot_description": robotiq_description}, robotiq_controllers],
-                remappings=[("joint_states", "robotiq/joint_states")],
                 output="screen",
             ),
-            Node(package="controller_manager", executable="spawner",
-                 arguments=["robotiq_joint_state_broadcaster", "-c", cm], output="screen"),
-            Node(package="controller_manager", executable="spawner",
-                 arguments=["robotiq_activation_controller", "-c", cm], output="screen"),
-            Node(package="controller_manager", executable="spawner",
-                 arguments=["robotiq_gripper_controller", "-c", cm], output="screen"),
+            Node(package="controller_manager", executable="spawner", namespace=ns,
+                 arguments=["robotiq_joint_state_broadcaster", "-c", "controller_manager"], output="screen"),
+            Node(package="controller_manager", executable="spawner", namespace=ns,
+                 arguments=["robotiq_activation_controller", "-c", "controller_manager"], output="screen"),
+            Node(package="controller_manager", executable="spawner", namespace=ns,
+                 arguments=["robotiq_gripper_controller", "-c", "controller_manager"], output="screen"),
         ]
     return nodes
 

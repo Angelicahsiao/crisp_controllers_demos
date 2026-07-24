@@ -1,12 +1,9 @@
-# Controller manager for the standalone Robotiq 2F-140 (separate from franka).
-# Same controller set and params as the UR integration's robotiq entries, so
-# crisp_py's Gripper talks to /robotiq_gripper_controller/gripper_cmd exactly
-# as before.
-# Node name is robotiq_controller_manager (NOT the default controller_manager)
-# so it can run alongside franka's controller_manager without a node-name
-# clash. The controllers themselves stay at root namespace, so crisp_py still
-# reaches /robotiq_gripper_controller/gripper_cmd.
-robotiq_controller_manager:
+# Controller manager for the standalone Robotiq 2F-85 (franka's gripper), run in
+# the /robotiq_2f85 namespace so it (a) never clashes with franka's
+# /controller_manager and (b) publishes on /robotiq_2f85/... to match the
+# crisp_gym deploy configs (dric_*_franka.yaml). Param keys are fully qualified
+# with the namespace so the controllers actually receive them.
+/robotiq_2f85/controller_manager:
   ros__parameters:
     update_rate: 100  # Hz
 
@@ -19,17 +16,17 @@ robotiq_controller_manager:
     robotiq_joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-robotiq_gripper_controller:
+/robotiq_2f85/robotiq_gripper_controller:
   ros__parameters:
     default: true
     joint: robotiq_85_left_knuckle_joint   # 2F-85 driven joint (not finger_joint, which is the 2F-140's)
     allow_stalling: true
 
-robotiq_activation_controller:
+/robotiq_2f85/robotiq_activation_controller:
   ros__parameters:
     default: true
 
-robotiq_joint_state_broadcaster:
+/robotiq_2f85/robotiq_joint_state_broadcaster:
   ros__parameters:
     joints:
       - robotiq_85_left_knuckle_joint
