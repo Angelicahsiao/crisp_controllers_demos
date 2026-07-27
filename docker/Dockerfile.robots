@@ -157,11 +157,29 @@ RUN sudo apt-get update && \
 # version string isn't parsed by the version reader). Removing it keeps the
 # meaningful version checks (e-Series < 5.23.0 and PolyScope X < 10.10.0) while
 # letting 10.12.1 through even if the major-version fallback misfires.
+#
+# Pin the git refs. Previously the driver was cloned from the moving `-b $ROS_DISTRO`
+# branch and the client library from its (moving) default branch, while ur_msgs came
+# from the fixed apt release. Once the driver branches advanced they began to call
+# ur_client_library::setTargetPayload (added in liburcl 2.13.0) and to #include
+# ur_msgs/action/send_script.hpp (a SendScript action not in the apt ur_msgs),
+# breaking the build against the pinned-by-apt dependencies. Pinning to a
+# pre-divergence, mutually-compatible set restores a reproducible build:
+#   - ur_client_library 2.12.0: has the ControlMode writeJointCommand overload and
+#     MODE_TORQUE=8, still uses setPayload (no setTargetPayload). Distro-agnostic.
+#   - ur_robot_driver: per-distro tag (driver ships a version line per ROS distro).
+#     Both tags call setPayload and pull no SendScript action, so apt ur_msgs suffices.
+#       humble -> 2.13.1, jazzy -> 3.8.0
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
+    && case "$ROS_DISTRO" in \
+         humble) UR_DRIVER_REF=2.13.1 ;; \
+         jazzy)  UR_DRIVER_REF=3.8.0 ;; \
+         *) echo "ERROR: no pinned ur_robot_driver ref for ROS_DISTRO=$ROS_DISTRO" && exit 1 ;; \
+       esac \
     && mkdir -p /tmp/ur_src/src && cd /tmp/ur_src/src \
-    && git clone --depth 1 -b $ROS_DISTRO \
+    && git clone --depth 1 -b "$UR_DRIVER_REF" \
         https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git \
-    && git clone --depth 1 \
+    && git clone --depth 1 -b 2.12.0 \
         https://github.com/UniversalRobots/Universal_Robots_Client_Library.git \
     && cd /tmp/ur_src \
     && sed -i \
