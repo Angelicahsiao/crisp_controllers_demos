@@ -130,9 +130,11 @@ x-kinova-overlay: &kinova-overlay
       ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     target: kinova-overlay
 
-# UR and Franka pin to Humble at both build- and run-time. The runtime
-# environment block is redefined (YAML merge does not deep-merge env maps)
-# so /ros_entrypoint.sh sources /opt/ros/humble/setup.bash on container start.
+# UR follows ROS_DISTRO (default humble; e.g. ROS_DISTRO=jazzy builds and runs
+# the jazzy image) at both build- and run-time - the launch commands source
+# /opt/ros/${ROS_DISTRO:-humble}/setup.bash. The runtime environment block is
+# redefined (YAML merge does not deep-merge env maps) so ROS_DISTRO reaches the
+# container and /ros_entrypoint.sh sources the matching setup.bash on start.
 x-ur-overlay: &ur-overlay
   <<: *base
   image: crisp_controllers_demos:ur-overlay
@@ -324,7 +326,7 @@ services:
     <<: *ur-overlay
     container_name: crisp_controllers_demos_launch_ur
     command: >
-      bash -lc "source /opt/ros/humble/setup.bash &&
+      bash -lc "source /opt/ros/${ROS_DISTRO:-humble}/setup.bash &&
       cd ~/ros2_ws &&
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
@@ -343,7 +345,7 @@ services:
     container_name: crisp_controllers_demos_launch_ur_gripper
     command: >
       bash -lc "if [ '${UR_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${UR_COM_PORT:-/dev/ttyUSB0}; fi &&
-      source /opt/ros/humble/setup.bash &&
+      source /opt/ros/${ROS_DISTRO:-humble}/setup.bash &&
       cd ~/ros2_ws &&
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
