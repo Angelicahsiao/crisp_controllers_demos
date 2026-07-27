@@ -1,0 +1,96 @@
+# Reproducible from-source build of the server-9 franka + Robotiq 2F-85 stack.
+#
+# Reproduces crisp_controllers_demos:franka-overlay-server9 (for FR3 system
+# 5.8.0 / FCI server version 9) WITHOUT depending on the preserved image.
+# Every git source is pinned to the exact commit in that image, and apt is
+# pinned to the ROS snapshot generation it was built against (pinocchio 3.9.0),
+# because the current rolling repo ships pinocchio 4.0.0 — against which the
+# pinned crisp_controllers does NOT build.
+#
+# Pins (extracted from the working image):
+#   libfranka            0.15.0  @155ddac  (FCI server 9; needs FR3 >= 5.7.2)
+#   franka_ros2                  @82ae42f  (brings franka_description 0.4.0 @677ae3d via its repos)
+#   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
+#   crisp_controllers    0.1.0   @db1d81a  (compiles against pinocchio 3.9.0, no MPL/deprecated shims)
+#   crisp_py                     @49b1665
+#   apt snapshot         humble/2026-03-01 (pinocchio 3.9.0, ros2_control 2.53.1)
+#
+# Build (from the repo root):
+#   docker build -f docker/Dockerfile.franka_server9 \
+#     -t crisp_controllers_demos:franka-overlay-server9 .
+#
+# NOTE — this build is the "proper" reproducible path but cannot be verified
+# here. The GUARANTEED backup of the working image is a tarball:
+#   docker save crisp_controllers_demos:franka-overlay-server9 | gzip > franka-server9.tar.gz
+#   # restore:  docker load < franka-server9.tar.gz
+# Keep that tarball; it restores the exact working image regardless of apt drift.
+#
+# If the build fails on apt (snapshot aged out / version conflict), see the
+# "apt snapshot" notes below.
+
+ARG ROS_DISTRO=humble
+FROM osrf/ros:${ROS_DISTRO}-desktop AS base
+
+# --- Pin apt to the server-9-era ROS snapshot (pinocchio 3.9.0) -------------
+# Repoint every ROS apt source (classic .list or deb822 .sources) at the dated
+# snapshot mirror. Allow downgrades so a newer pre-installed base package is
+# rolled back to the snapshot generation.
+ARG ROS_DISTRO=humble
+ARG ROS_SNAPSHOT=2026-03-01
+RUN set -eux; \
+    find /etc/apt -name '*.list' -o -name '*.sources' | while read -r f; do \
+      sed -i -E "s#(https?://)packages.ros.org/ros2(-testing)?/ubuntu#http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu#g" "$f"; \
+    done; \
+    apt-get update; \
+    apt-get -y -o Dpkg::Options::=--force-confnew \
+        --allow-downgrades dist-upgrade || true
+
+# Build tooling
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git python3-vcstool python3-colcon-common-extensions python3-rosdep \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV WS=/home/ros/ros2_ws
+RUN useradd -m ros 2>/dev/null || true
+WORKDIR ${WS}
+
+# --- franka: libfranka 0.15.0 + franka_ros2 @82ae42f + franka_description 0.4.0 ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && git clone https://github.com/frankarobotics/franka_ros2.git src/franka_ros2 \
+    && git -C src/franka_ros2 checkout 82ae42f697346c4c088c1dbca51768fbc8a123c9 \
+    # franka_ros2 @1.0.0-era uses franka.repos (older name); import whichever exists.
+    && for r in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
+         [ -f "$r" ] && vcs import src < "$r" --recursive --skip-existing || true; \
+       done \
+    && apt-get update && rosdep update \
+    && rosdep install --from-paths src --ignore-src -r -y --rosdistro ${ROS_DISTRO} \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Robotiq: ros2_robotiq_gripper @e78b482 (description + driver + controllers) ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
+    && git clone --branch ${ROS_DISTRO} https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper \
+    && git -C src/ros2_robotiq_gripper checkout e78b482c98a58cc3a91ab14c9dd7db3e296c1088 \
+    && apt-get update \
+    && vcs import src < src/ros2_robotiq_gripper/ros2_robotiq_gripper.${ROS_DISTRO}.repos --recursive --skip-existing \
+    && rosdep install -q --from-paths src --ignore-src -y \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select serial \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        --packages-select robotiq_description robotiq_driver robotiq_controllers \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- crisp: crisp_controllers @db1d81a + crisp_py @49b1665 + demos package ----
+COPY . src/crisp_controllers_demos
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
+    && git clone https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers \
+    && git -C src/crisp_controllers checkout db1d81a5f924f9e5bcae59b0b476b0410d37bbbf \
+    && git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py \
+    && git -C src/crisp_py checkout 49b1665e95d1187e80c86ac02b832c91087e61c2 \
+    && apt-get update && rosdep update \
+    && rosdep install -q --from-paths src --ignore-src -y --rosdistro ${ROS_DISTRO} \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        --packages-select crisp_controllers crisp_py crisp_controllers_robot_demos \
+    && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash"]
