@@ -47,6 +47,13 @@ ARG ROS_DISTRO=humble
 #       http://snapshots.ros.org/humble/$d/ubuntu/dists/jammy/Release; done | grep '^200'
 # then confirm pinocchio is still 3.9 on it and pass --build-arg ROS_SNAPSHOT=<date>.
 ARG ROS_SNAPSHOT=2026-03-29
+# snapshots.ros.org InRelease is signed by the "ROS Snapshot builder" key
+# (rosbuild@ros.org), which is NOT in the base-image keyring (that only trusts
+# packages.ros.org) -> without it apt rejects the repointed repo as "not signed"
+# (NO_PUBKEY AD19BAB3CBF125EA). Pin the full fingerprint; the RUN below fetches
+# it from keyserver.ubuntu.com and appends it to the keyring the ROS sources
+# reference (and trusted.gpg.d), so the repointed repo verifies.
+ARG ROS_SNAPSHOT_KEY=4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA
 # Preflight: fail fast with actionable guidance if the chosen snapshot has no
 # Release file, instead of the cryptic apt "does not have a Release file" error.
 RUN set -eux; \
@@ -61,6 +68,14 @@ RUN set -eux; \
         exit 1; \
       fi; \
     fi; \
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${ROS_SNAPSHOT_KEY}" \
+      | gpg --dearmor > /tmp/ros-snapshot.gpg; \
+    gpg --show-keys --with-colons /tmp/ros-snapshot.gpg | grep -qi "${ROS_SNAPSHOT_KEY}"; \
+    keyrings="$(grep -rhoE --include='*.list' --include='*.sources' \
+        '(Signed-By:[[:space:]]*|signed-by=)[^][:space:],]+' /etc/apt 2>/dev/null \
+        | sed -E 's/^(Signed-By:[[:space:]]*|signed-by=)//' | sort -u)"; \
+    for k in $keyrings; do [ -f "$k" ] && cat /tmp/ros-snapshot.gpg >> "$k"; done; \
+    install -m0644 /tmp/ros-snapshot.gpg /etc/apt/trusted.gpg.d/ros-snapshot.gpg; \
     find /etc/apt -name '*.list' -o -name '*.sources' | while read -r f; do \
       sed -i -E "s#(https?://)packages.ros.org/ros2(-testing)?/ubuntu#http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu#g" "$f"; \
     done; \
