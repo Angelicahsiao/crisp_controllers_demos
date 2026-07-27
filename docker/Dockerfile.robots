@@ -212,14 +212,15 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
 
 FROM ur AS ur-overlay
 
-# 2.3.1 (not 1.1.0): modern ROS apt (humble and jazzy) now ships pinocchio 3.x/4.x,
+# 2.4.1 (not 1.1.0): modern ROS apt (humble and jazzy) now ships pinocchio 3.x/4.x,
 # and no crisp_controllers 1.x release compiles against it - 1.x includes
 # pinocchio-2-era .hxx headers (e.g. frames.hxx) that pinocchio 3+ removed, plus
 # plain <pinocchio/multibody/model.hpp> that only resolves via the deprecated/merged
-# include root. v2.3.1 uses .hpp includes throughout (same choice as franka-overlay).
+# include root. 2.x uses .hpp includes throughout; 2.4.1 is the latest release and
+# tracks upstream's current pinocchio support (same version as franka-overlay).
 # CAVEAT: this bumps UR from 1.1.0, so UR controller/torque parameters may differ
 # from the old image; that version skew is the first suspect if behavior changes.
-ARG CRISP_CONTROLLERS_VERSION=2.3.1
+ARG CRISP_CONTROLLERS_VERSION=2.4.1
 
 COPY . src/crisp_controllers_demos
 
@@ -249,12 +250,11 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
 
 FROM franka AS franka-overlay
 
-# 2.3.1 (not 1.1.0 like ur-overlay): no 1.x release compiles against the
-# pinocchio 3.x now shipped by humble apt - 1.x includes pinocchio-2-era
-# .hxx headers (frames.hxx) that pinocchio 3 removed. v2.3.1 uses .hpp
-# includes throughout. If controller parameters behave differently than
-# the UR image (still on 1.1.0), this version skew is the first suspect.
-ARG CRISP_CONTROLLERS_VERSION=2.3.1
+# 2.4.1: no crisp_controllers 1.x release compiles against the pinocchio 3.x/4.x
+# now shipped by ROS apt - 1.x includes pinocchio-2-era .hxx headers (frames.hxx)
+# that pinocchio 3 removed. 2.x uses .hpp includes throughout; 2.4.1 is the latest
+# release and matches ur-overlay (both overlays share this version).
+ARG CRISP_CONTROLLERS_VERSION=2.4.1
 
 COPY . src/crisp_controllers_demos
 
@@ -281,7 +281,7 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     #    headers without linking the target don't inherit that path, so add it.
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/humble/include/pinocchio/deprecated" \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/$ROS_DISTRO/include/pinocchio/deprecated" \
         --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
