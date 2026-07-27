@@ -9,7 +9,9 @@
 #
 # Pins (extracted from the working image):
 #   libfranka            0.15.0  @155ddac  (FCI server 9; needs FR3 >= 5.7.2)
-#   franka_ros2                  @82ae42f  (brings franka_description 0.4.0 @677ae3d via its repos)
+#   franka_ros2          v1.0.0  @ee7e659  (monorepo: franka_hardware/gripper/msgs in-tree;
+#                                            franka_description resolved from apt via rosdep.
+#                                            Old pin @82ae42f is no longer reachable upstream.)
 #   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
 #   crisp_controllers    0.1.0   @db1d81a  (compiles against pinocchio 3.9.0, no MPL/deprecated shims)
 #   crisp_py                     @49b1665
@@ -91,11 +93,16 @@ ENV WS=/home/ros/ros2_ws
 RUN useradd -m ros 2>/dev/null || true
 WORKDIR ${WS}
 
-# --- franka: libfranka 0.15.0 + franka_ros2 @82ae42f + franka_description 0.4.0 ---
+# --- franka: libfranka 0.15.0 + franka_ros2 v1.0.0 (monorepo) ---
+# The tag's SHA is pinned for byte-level reproducibility. franka_ros2 v1.0.0
+# ships franka_hardware / franka_gripper / franka_msgs in-tree; franka_description
+# is NOT in the monorepo and is resolved from apt via rosdep against the pinned
+# ROS snapshot. The old pin (82ae42f, plus a franka.repos file to fetch
+# franka_description 0.4.0) is no longer reachable upstream.
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && git clone https://github.com/frankarobotics/franka_ros2.git src/franka_ros2 \
-    && git -C src/franka_ros2 checkout 82ae42f697346c4c088c1dbca51768fbc8a123c9 \
-    # franka_ros2 @1.0.0-era uses franka.repos (older name); import whichever exists.
+    && git -C src/franka_ros2 checkout ee7e659e7e8d3587a83bc3f4025bd7fd8003aebc \
+    # Kept as a no-op guard: v1.0.0 ships no .repos file, but a future pin might.
     && for r in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
          [ -f "$r" ] && vcs import src < "$r" --recursive --skip-existing || true; \
        done \
