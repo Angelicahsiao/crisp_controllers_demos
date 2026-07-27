@@ -212,7 +212,14 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
 
 FROM ur AS ur-overlay
 
-ARG CRISP_CONTROLLERS_VERSION=1.1.0
+# 2.3.1 (not 1.1.0): modern ROS apt (humble and jazzy) now ships pinocchio 3.x/4.x,
+# and no crisp_controllers 1.x release compiles against it - 1.x includes
+# pinocchio-2-era .hxx headers (e.g. frames.hxx) that pinocchio 3+ removed, plus
+# plain <pinocchio/multibody/model.hpp> that only resolves via the deprecated/merged
+# include root. v2.3.1 uses .hpp includes throughout (same choice as franka-overlay).
+# CAVEAT: this bumps UR from 1.1.0, so UR controller/torque parameters may differ
+# from the old image; that version skew is the first suspect if behavior changes.
+ARG CRISP_CONTROLLERS_VERSION=2.3.1
 
 COPY . src/crisp_controllers_demos
 
@@ -227,8 +234,16 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    # BUILD_TESTING=OFF: the humble-branch ros2_robotiq_gripper test
+    # (test_robotiq_gripper_hardware_interface.cpp) calls the removed
+    # ResourceManager(std::string) ctor, which no longer exists on jazzy's
+    # hardware_interface; tests aren't needed in the image. Harmless on humble.
+    # pinocchio flags (see franka-overlay): Boost.MPL joint-variant limit + the
+    # deprecated include root for headers included without linking the target.
+    # Distro-generic path; the -I is simply ignored where the dir is absent.
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=OFF \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/$ROS_DISTRO/include/pinocchio/deprecated" \
         --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
