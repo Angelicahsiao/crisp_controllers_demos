@@ -80,6 +80,32 @@ RUN sudo apt update && sudo apt-get install -y libglfw3-dev wget \
 
 WORKDIR /home/ros/ros2_ws
 
+# Auto-configure interactive `docker exec` shells. docker exec bypasses
+# /ros_entrypoint.sh, so a plain shell has no ROS 2 sourced, no workspace
+# overlay, and the inherited CYCLONEDDS_URI points at the template config whose
+# interface may not exist here - so bare `ros2 ...` fails (CycloneDDS cannot
+# create the domain). Mirror what the compose launch command sets up. Fully
+# guarded: interactive-only, sources nothing that is absent, and reuses the
+# interface-resolved config the launch already generated (no daemon restart)
+# when it exists, so opening a shell never hangs or aborts.
+RUN cat >> /home/ros/.bashrc <<'EOF'
+
+# --- crisp_controllers_demos: interactive-shell ROS 2 setup ---
+if [[ $- == *i* ]]; then
+  [ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ] && source "/opt/ros/${ROS_DISTRO}/setup.bash"
+  [ -f /home/ros/ros2_ws/install/setup.bash ] && source /home/ros/ros2_ws/install/setup.bash
+  if [ "${RMW:-cyclone}" = "cyclone" ]; then
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    if [ -f /tmp/cyclone_config_resolved.xml ]; then
+      export CYCLONEDDS_URI=file:///tmp/cyclone_config_resolved.xml
+    elif [ -f /home/ros/ros2_ws/src/crisp_controllers_demos/scripts/set_cyclone_config.sh ]; then
+      source /home/ros/ros2_ws/src/crisp_controllers_demos/scripts/set_cyclone_config.sh
+    fi
+  fi
+fi
+# --- end crisp_controllers_demos ---
+EOF
+
 FROM base AS franka
 
 # === FRANKA ROS2 ===
