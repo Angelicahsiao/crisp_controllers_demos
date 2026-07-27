@@ -44,6 +44,12 @@
           <param name="trajectory_port">50003</param>
           <param name="script_command_port">50004</param>
           <param name="non_blocking_read">true</param>
+          <!-- robot_receive_timeout (seconds) is parsed with std::stof() in the
+               Jazzy driver's on_configure; a missing key gives stof("") which throws
+               std::invalid_argument ("... configuring hardware: stof"). 0.04 matches
+               the driver's own ur.ros2_control.xacro default. Humble's driver does not
+               read this key, so setting it here is harmless on both distros. -->
+          <param name="robot_receive_timeout">0.04</param>
           <!-- servoj_gain is parsed with stoi(); servoj_lookahead_time with stod().
                Both are read in on_configure before the tool params, so they must be
                present or the driver aborts with std::invalid_argument: stoi. -->
