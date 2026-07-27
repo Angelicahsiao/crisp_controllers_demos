@@ -13,7 +13,7 @@
 #   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
 #   crisp_controllers    0.1.0   @db1d81a  (compiles against pinocchio 3.9.0, no MPL/deprecated shims)
 #   crisp_py                     @49b1665
-#   apt snapshot         humble/2026-03-01 (pinocchio 3.9.0, ros2_control 2.53.1)
+#   apt snapshot         humble/2026-03-29 (pinocchio 3.9.0-1jammy.20260304; verified)
 #
 # Build (from the repo root):
 #   docker build -f docker/Dockerfile.franka_server9 \
@@ -36,13 +36,31 @@ FROM osrf/ros:${ROS_DISTRO}-desktop AS base
 # snapshot mirror. Allow downgrades so a newer pre-installed base package is
 # rolled back to the snapshot generation.
 ARG ROS_DISTRO=humble
-# ROS snapshots exist only on specific sync dates, not daily. 2026-02-19 matches
-# this image's package timestamps (pinocchio 3.9.0-...20260219, ros2_control
-# 2.53.1-...20260219). If this date 404s ("does not have a Release file"),
-# browse http://snapshots.ros.org/humble/ for a valid date in the pinocchio-3.9
-# window (~2026-02 .. 2026-05) and pass --build-arg ROS_SNAPSHOT=<date>.
-ARG ROS_SNAPSHOT=2026-02-19
+# ROS snapshots exist only on specific sync dates, not daily. Verified-good
+# dates that still ship pinocchio 3.9.0 (both 3.9.0-1jammy.20260304):
+#   2026-03-29 (default)   2026-05-14
+# The old 2026-02-19 was NEVER a published snapshot (no Release file -> apt 404);
+# it was mistakenly inferred from package build-timestamps, not a sync date.
+# To find/refresh valid dates (snapshots.ros.org has no browsable index; probe):
+#   for d in 2026-03-{01..31} 2026-04-{01..30} 2026-05-{01..31}; do \
+#     curl -s -o /dev/null -w "%{http_code} $d\n" \
+#       http://snapshots.ros.org/humble/$d/ubuntu/dists/jammy/Release; done | grep '^200'
+# then confirm pinocchio is still 3.9 on it and pass --build-arg ROS_SNAPSHOT=<date>.
+ARG ROS_SNAPSHOT=2026-03-29
+# Preflight: fail fast with actionable guidance if the chosen snapshot has no
+# Release file, instead of the cryptic apt "does not have a Release file" error.
 RUN set -eux; \
+    REL="http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu/dists/jammy/Release"; \
+    if command -v curl >/dev/null 2>&1; then \
+      code="$(curl -s -o /dev/null -w '%{http_code}' "$REL" || echo 000)"; \
+      if [ "$code" != 200 ]; then \
+        echo "ERROR: ROS snapshot '${ROS_SNAPSHOT}' has no Release file (HTTP $code):" >&2; \
+        echo "       $REL" >&2; \
+        echo "       Pick a published date that still ships pinocchio 3.9 and pass" >&2; \
+        echo "       --build-arg ROS_SNAPSHOT=<date> (see the comment above this RUN)." >&2; \
+        exit 1; \
+      fi; \
+    fi; \
     find /etc/apt -name '*.list' -o -name '*.sources' | while read -r f; do \
       sed -i -E "s#(https?://)packages.ros.org/ros2(-testing)?/ubuntu#http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu#g" "$f"; \
     done; \
