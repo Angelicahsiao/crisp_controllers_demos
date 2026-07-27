@@ -23,20 +23,40 @@
 
   <link name="world"/>
 
-  <!-- generate_ros2_control_tag="false": the apt ur_description macro does not honour
-       script_filename/recipe params and produces a to_be_filled_by_ur_robot_driver
-       placeholder. The custom ur_arm_ros2_control macro below embeds the correct paths. -->
-  <xacro:ur_robot
-    name="${ur_type_val}"
-    tf_prefix="${tf_prefix_val}"
-    parent="world"
-    joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
-    kinematics_parameters_file="$(arg kinematics_parameters_file)"
-    physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
-    visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
-    generate_ros2_control_tag="false">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-  </xacro:ur_robot>
+  <!-- ur_description's ur_robot macro differs by distro:
+       - Humble: also emits a <ros2_control> block. We suppress it with
+         generate_ros2_control_tag="false" because that block does not honour
+         script_filename/recipe params (it emits a to_be_filled_by_ur_robot_driver
+         placeholder); the custom ur_arm_ros2_control macro below embeds the real paths.
+       - Jazzy+: the macro is kinematic-only and has no generate_ros2_control_tag
+         parameter, so passing it raises 'Invalid parameter generate_ros2_control_tag'.
+       Branch on ROS_DISTRO so the same file works on both. -->
+  <xacro:arg name="ros_distro" default="$(env ROS_DISTRO)"/>
+  <xacro:if value="${xacro.arg('ros_distro') == 'humble'}">
+    <xacro:ur_robot
+      name="${ur_type_val}"
+      tf_prefix="${tf_prefix_val}"
+      parent="world"
+      joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+      kinematics_parameters_file="$(arg kinematics_parameters_file)"
+      physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
+      generate_ros2_control_tag="false">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:ur_robot>
+  </xacro:if>
+  <xacro:unless value="${xacro.arg('ros_distro') == 'humble'}">
+    <xacro:ur_robot
+      name="${ur_type_val}"
+      tf_prefix="${tf_prefix_val}"
+      parent="world"
+      joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+      kinematics_parameters_file="$(arg kinematics_parameters_file)"
+      physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:ur_robot>
+  </xacro:unless>
 
   <xacro:ur_arm_ros2_control
     name="${ur_type_val}"
