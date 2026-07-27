@@ -36,7 +36,12 @@ FROM osrf/ros:${ROS_DISTRO}-desktop AS base
 # snapshot mirror. Allow downgrades so a newer pre-installed base package is
 # rolled back to the snapshot generation.
 ARG ROS_DISTRO=humble
-ARG ROS_SNAPSHOT=2026-03-01
+# ROS snapshots exist only on specific sync dates, not daily. 2026-02-19 matches
+# this image's package timestamps (pinocchio 3.9.0-...20260219, ros2_control
+# 2.53.1-...20260219). If this date 404s ("does not have a Release file"),
+# browse http://snapshots.ros.org/humble/ for a valid date in the pinocchio-3.9
+# window (~2026-02 .. 2026-05) and pass --build-arg ROS_SNAPSHOT=<date>.
+ARG ROS_SNAPSHOT=2026-02-19
 RUN set -eux; \
     find /etc/apt -name '*.list' -o -name '*.sources' | while read -r f; do \
       sed -i -E "s#(https?://)packages.ros.org/ros2(-testing)?/ubuntu#http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu#g" "$f"; \
