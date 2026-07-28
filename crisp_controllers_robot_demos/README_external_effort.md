@@ -12,10 +12,19 @@ tau_ext = tau_measured - (scale * g(q) + offset)
 ```
 
 - `g(q)` — gravity torque from the robot model (built from the live
-  `/robot_description`, so gripper link masses are included automatically).
-- `scale`, `offset` — optional per-joint calibration fitted from contact-free
-  motion. They absorb the current-to-torque scale error and static offsets
-  that otherwise show up as a pose-dependent residual.
+  `/robot_description`, so gripper/tool link masses load the model — but only as
+  accurately as the URDF encodes them; see the payload note below).
+- `scale` — **fixed at 1.0.** `g(q)` is the physically correct RNEA gravity, so
+  it must not be rescaled; a fitted gain would only distort a correct model.
+- `offset` — optional per-joint **constant** (current bias / static friction)
+  fitted from contact-free motion.
+
+> **Payload accuracy matters.** `g(q)` is only right if the URDF link masses are
+> right. The `robotiq_description` models only ~0.36 kg of the 2F-140, while a
+> real gripper + coupling is ~1.3 kg — the missing mass shows up as a
+> *pose-dependent* phantom effort that no constant `offset` can remove. Measure
+> the true payload with `identify_payload` (wrist F/T) and put it in the URDF
+> (done for `ur_single_robotiq.urdf.xacro`). Only then is `scale ≡ 1` justified.
 
 With the arm at rest and nothing touching it, `tau_ext` should be near zero in
 any pose; pushing on a link deflects the joints upstream of the contact.
@@ -26,7 +35,8 @@ any pose; pushing on a link deflects the joints upstream of the contact.
 |---|---|
 | `crisp_controllers_robot_demos/external_effort.py` | `ExternalEffortEstimator`: Pinocchio model, gravity term, calibration fit. |
 | `crisp_controllers_robot_demos/external_effort_node.py` | ROS 2 node: subscribes `/robot_description` + `/joint_states`, publishes `tau_ext`. |
-| `crisp_controllers_robot_demos/calibrate_external_effort.py` | Records contact-free samples, fits `scale`/`offset`, writes a calibration YAML. |
+| `crisp_controllers_robot_demos/calibrate_external_effort.py` | Records contact-free samples, fits the constant `offset` (scale ≡ 1), writes a calibration YAML. |
+| `crisp_controllers_robot_demos/identify_payload.py` | Measures the tool payload mass + COM from the wrist F/T sensor (feeds the URDF payload so `g(q)` is accurate). |
 | `launch/external_effort.launch.py` | Launches the node, optionally with a calibration file. |
 
 Pinocchio stays on the robot side: consumers (e.g. `crisp_gym`) read the
@@ -50,9 +60,11 @@ Requires the robot bring-up to be running and publishing:
 
 ## Calibration (recommended)
 
-Pure gravity subtraction leaves a pose-dependent residual of a few Nm because
-the UR's current-derived effort has per-joint scale errors. A one-time
-calibration removes most of it.
+With an accurate mass model, the only thing left in `tau_ext` at rest is a
+constant per-joint bias (current offset + static friction). Calibration
+identifies just that constant (`scale` stays 1.0); it does **not** try to fix a
+pose-dependent residual — that means the mass model is wrong, so fix the payload
+(`identify_payload`) instead.
 
 **1. Record and fit.** Recording stops when you press **ENTER** (or after
 `duration` seconds as a safety cap). `joint_names` is **required**. Example for
@@ -65,25 +77,12 @@ ros2 run crisp_controllers_robot_demos calibrate_external_effort \
   -p output_file:=/home/ros/ros2_ws/src/crisp_controllers_demos/external_effort_calibration.yaml
 ```
 
-Move the arm slowly with **nothing touching it**. The fit can only identify a
-joint's scale if **gravity loads that joint differently across the poses you
-record** — so you must actively drive each joint through motions that change
-its gravity torque:
+Move the arm slowly with **nothing touching it**, through a spread of
+representative poses so the constant bias is averaged over the workspace. (Since
+only a constant is fit, you no longer need to excite each joint's gravity span —
+the live `span` readout is now just a motion indicator, not a fit gate.)
 
-| Joint | Motion needed for a good fit |
-|---|---|
-| `shoulder_lift` | raise/lower the whole arm: horizontal → up → down |
-| `elbow` | fully fold and fully extend the elbow |
-| `wrist_1` | pitch the wrist up and down |
-| `wrist_2` | **roll** the wrist so its axis tilts between vertical and horizontal |
-| `shoulder_pan`, `wrist_3` | rotate about near-vertical axes — gravity barely loads them in **any** pose, so their scale is **physically unidentifiable**; the script keeps `scale=1.0` and fits only their offset. Expected, not an error. |
-
-While recording, the node prints a live **gravity span** per joint
-(`shoulder_lift:4.2OK  elbow:0.3..`). Keep moving a joint until its span is
-several Nm (`OK`); `..` means it still needs more excitation. A span below
-`min_span` (default 1 Nm) at the end means that joint's scale is left at 1.0.
-
-The final report prints per-joint `scale`, `offset`, `gravity_span` and
+The final report prints per-joint `scale` (all 1.0), `offset`, `gravity_span` and
 `residual_rms` (roughly the noise floor of your estimate — typically 0.5–1.5 Nm
 after a good calibration; a much larger value means that joint was poorly
 excited or friction-dominated).
@@ -111,7 +110,7 @@ added camera, tool payload).
 | `joint_state_topic` | `joint_states` | Source topic (must carry effort). |
 | `output_topic` | `external_joint_effort` | Published `Float32MultiArray`. |
 | `calibration_file` | `""` | YAML from the calibration script; empty = `scale 1, offset 0`. |
-| `scale` / `offset` | `1.0` / `0.0` per joint | Manual calibration; overridden by `calibration_file`. |
+| `scale` / `offset` | `1.0` / `0.0` per joint | `offset` = manual constant bias; overridden by `calibration_file`. Leave `scale` at 1.0 (RNEA gravity is not rescaled). |
 
 A node namespace (e.g. `right`) is prepended to joint names (`right_...`) when
 matching `/joint_states`, mirroring crisp_py; if the URDF already bakes the
@@ -125,7 +124,7 @@ prefix in, the un-prefixed names are used as a fallback.
 | `stop_on_key` | `True` | Stop recording when ENTER is pressed. |
 | `duration` | `120.0` | Max recording seconds / safety cap when `stop_on_key`. |
 | `sample_rate` | `5.0` | Sampling rate in Hz. |
-| `min_span` | `1.0` | Gravity span (Nm) below which a joint's scale is left at 1.0 and only its offset is fit. |
+| `min_span` | `1.0` | Gravity span (Nm) below which a joint is flagged low-motion in the live display. Informational only now (scale is always 1.0). |
 | `output_file` | `external_effort_calibration.yaml` | Where to write the fit. |
 | `joint_state_topic` | `joint_states` | Source topic. |
 
@@ -133,8 +132,8 @@ Calibration YAML format:
 
 ```yaml
 joint_names:  [shoulder_pan_joint, ...]
-scale:        [1.043, ...]   # per-joint gain a (1.0 if span < min_span)
-offset:       [-0.31, ...]   # per-joint offset b  [Nm]
+scale:        [1.0, ...]     # always 1.0 (RNEA gravity is not rescaled)
+offset:       [-0.31, ...]   # per-joint constant bias b  [Nm]
 gravity_span: [0.0, ...]     # how much gravity torque varied while recording [Nm]
 residual_rms: [0.7, ...]     # fit quality per joint [Nm]
 n_samples: 240
@@ -145,14 +144,15 @@ n_samples: 240
 - **Quasi-static.** Only gravity is subtracted — inertial/Coriolis torques are
   not — so readings during fast motion overestimate contact. Intended for
   teleop-speed motion and contact detection.
-- **Friction is not modeled.** The scale/offset fit absorbs its static
-  average, but direction-dependent friction remains in the signal (the main
-  residual after calibration).
+- **Friction is not modeled.** The `offset` absorbs its static average, but
+  direction-dependent friction remains in the signal (the main residual after
+  calibration).
 - **Current-derived source.** The UR has no joint torque sensors; treat the
   output as an estimate, not calibrated Nm.
-- **Model completeness.** Anything with mass that is not in
-  `/robot_description` (e.g. a camera) biases the estimate — add it to the
-  URDF or rely on calibration to absorb it at fixed mounting.
+- **Model completeness.** Anything with mass that is not in `/robot_description`
+  (a gripper whose URDF mass is too low, a camera, a tool) biases the estimate
+  *pose-dependently* — a constant `offset` cannot absorb it. Measure it with
+  `identify_payload` and add it to the URDF (see the payload note at the top).
 
 ## Consuming from crisp_py / crisp_gym
 

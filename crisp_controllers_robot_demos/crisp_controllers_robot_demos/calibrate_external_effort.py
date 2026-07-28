@@ -1,28 +1,24 @@
 """Record contact-free joint effort samples and fit the external-effort calibration.
 
-The UR's current-derived effort has per-joint scale errors and static offsets,
-so pure gravity subtraction (scale=1, offset=0) leaves a pose-dependent
-residual. This script records (q, tau_measured) while the arm moves slowly
-with NOTHING touching it, fits tau_measured ~ scale * g(q) + offset per joint,
-and writes the result to a YAML that external_effort_node loads via its
-'calibration_file' parameter.
+The UR's current-derived effort carries a static per-joint bias (current offset
++ static friction), so even with a correct gravity model a constant residual
+remains. This script records (q, tau_measured) while the arm moves slowly with
+NOTHING touching it and fits ONLY that constant per joint:
+
+    offset_j = mean(tau_measured_j - g(q)_j),   scale fixed at 1.0
+
+g(q) is the Pinocchio RNEA gravity torque and is left unscaled — it is already
+the physically correct gravity (given the URDF masses), so a fitted gain would
+only distort a correct model. If a *pose-dependent* residual remains, that means
+the URDF mass model is wrong (e.g. an unmodelled gripper payload); fix the model
+(see identify_payload) rather than rescaling gravity. The result is written to a
+YAML that external_effort_node loads via its 'calibration_file' parameter (with
+scale all 1.0 for compatibility).
 
 Recording stops when you press ENTER (default) or after 'duration' seconds as a
-safety cap. During recording the node prints, per joint, how much the gravity
-torque has varied so far ("span") — KEEP MOVING each joint until its span is
-large (several Nm) or it is flagged as physically unexciteable.
-
-WHAT A GOOD RECORDING NEEDS (gravity must load each joint differently across
-the samples, or its scale cannot be identified):
-    - shoulder_lift : raise/lower the whole arm, horizontal -> up -> down.
-    - elbow         : fully fold and fully extend the elbow.
-    - wrist_1       : pitch the wrist up and down.
-    - wrist_2       : ROLL the wrist so its axis tilts between vertical and
-                      horizontal (otherwise its gravity span stays ~0).
-    - shoulder_pan and wrist_3 rotate about near-vertical axes: gravity barely
-      loads them in ANY pose, so their scale is physically unidentifiable. The
-      script detects this (span below --min_span) and keeps scale=1.0 for them,
-      fitting only the offset. This is expected, not an error.
+safety cap. Move the arm through a spread of representative poses so the constant
+bias is averaged over the workspace; per-joint gravity "span" is still printed as
+a motion/diversity indicator, but it no longer gates the fit.
 
 Usage (UR7e example):
 
@@ -36,8 +32,9 @@ Parameters:
     stop_on_key (bool)       stop when ENTER is pressed (default True).
     duration (double)        max recording seconds / safety cap (default 120).
     sample_rate (double)     sampling rate in Hz (default 5).
-    min_span (double)        gravity span (Nm) below which a joint's scale is
-                             left at 1.0 and only its offset is fit (default 1).
+    min_span (double)        gravity span (Nm) below which a joint is flagged
+                             low-motion in the live display; informational only
+                             now (scale is always 1.0) (default 1).
     output_file (str)        YAML path (default external_effort_calibration.yaml).
     joint_state_topic (str)  default "joint_states".
 """
@@ -218,24 +215,17 @@ class CalibrateExternalEffort(Node):
         spans = np.ptp(gravity, axis=0)
 
         n = len(self._model_joint_names)
+        # scale is FIXED at 1.0: g(q) is the Pinocchio RNEA gravity torque, which
+        # is already physically correct (given the URDF masses), so it must not be
+        # rescaled — a fitted gain would distort a correct model. Only a constant
+        # per-joint offset (current bias / static friction) is identified:
+        #     offset_j = mean(tau_j - g_j)
+        # If a real residual remains after this, the fix is an accurate URDF mass
+        # model (e.g. the measured gripper payload), not a gravity gain.
         scale = np.ones(n)
-        offset = np.zeros(n)
-        for j, name in enumerate(self._model_joint_names):
-            if spans[j] >= self._min_span:
-                # well-excited: joint least-squares fit tau ~ a*g + b
-                A = np.stack([gravity[:, j], np.ones(len(qs))], axis=1)
-                (a, b), *_ = np.linalg.lstsq(A, taus[:, j], rcond=None)
-                scale[j], offset[j] = a, b
-            else:
-                # unidentifiable scale (near-constant gravity): keep scale=1,
-                # fit only the offset so we don't invent a garbage gain.
-                scale[j] = 1.0
-                offset[j] = float(np.mean(taus[:, j] - gravity[:, j]))
-                self.get_logger().warning(
-                    f"'{name}': gravity span {spans[j]:.2f} Nm < {self._min_span} "
-                    "— scale left at 1.0, only offset fit (expected for "
-                    "pan/wrist_3, or move this joint more)."
-                )
+        offset = np.array(
+            [float(np.mean(taus[:, j] - gravity[:, j])) for j in range(n)]
+        )
 
         residual = taus - (scale * gravity + offset)
         rms = np.sqrt((residual**2).mean(axis=0))

@@ -8,8 +8,10 @@ gravity term g(q):
 
     tau_ext = tau_measured - (scale * g(q) + offset)
 
-scale/offset are optional per-joint calibration gains fitted from contact-free
-motion (they absorb current-to-torque scale errors and static friction).
+scale is fixed at 1.0 — g(q) is the physically correct RNEA gravity and must not
+be rescaled — and offset is an optional per-joint constant (current bias / static
+friction) fitted from contact-free motion. For g(q) to be accurate the URDF must
+carry the true link masses, including the tool payload (see identify_payload).
 Quasi-static assumption: inertial/Coriolis torques are not subtracted, so
 readings during fast motion overestimate contact.
 
@@ -78,17 +80,21 @@ class ExternalEffortEstimator:
         return np.asarray(tau_measured) - (self.scale * self.gravity_effort(q) + self.offset)
 
     def fit_calibration(self, qs: NDArray, taus_measured: NDArray) -> tuple[NDArray, NDArray]:
-        """Fit per-joint scale/offset from contact-free samples.
+        """Fit the per-joint constant offset from contact-free samples.
 
         Record (q, tau_measured) pairs while the arm moves slowly with nothing
-        touching it, then least-squares fit tau_measured ~ a * g(q) + b per
-        joint. Stores and returns (scale, offset).
+        touching it, then fit only the constant bias per joint:
+
+            offset_j = mean(tau_measured_j - g(q)_j),   scale fixed at 1.0
+
+        g(q) is not rescaled: the Pinocchio RNEA gravity is already the correct
+        gravity torque (given the URDF masses), so a fitted gain would distort a
+        correct model. A pose-dependent residual instead points to a wrong URDF
+        mass (e.g. an unmodelled payload). Stores and returns (scale, offset).
         """
         qs = np.asarray(qs)
         taus = np.asarray(taus_measured)
         gravity = np.stack([self.gravity_effort(q) for q in qs])
-        for j in range(gravity.shape[1]):
-            A = np.stack([gravity[:, j], np.ones(len(qs))], axis=1)
-            (a, b), *_ = np.linalg.lstsq(A, taus[:, j], rcond=None)
-            self.scale[j], self.offset[j] = a, b
+        self.scale = np.ones(gravity.shape[1])
+        self.offset = (taus - gravity).mean(axis=0)
         return self.scale, self.offset

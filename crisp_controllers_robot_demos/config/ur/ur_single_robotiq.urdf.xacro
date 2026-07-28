@@ -80,4 +80,35 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:robotiq_gripper>
 
+  <!-- Measured payload correction. The robotiq_description URDF models only
+       ~0.364 kg of the 2F-140, but the true gripper + coupling + fingers was
+       measured at 1.3096 kg with COM in tool0 = (-0.0021, -0.0031, 0.0579) m
+       using `ros2 run crisp_controllers_robot_demos identify_payload` (wrist F/T
+       least-squares fit). Add the DIFFERENCE as a lumped mass at the measured
+       COM so the Pinocchio gravity model g(q) - used by external_effort
+       estimation AND any model-based controller reading /robot_description -
+       reflects the real payload. Only mass and COM affect gravity torque; the
+       inertia tensor is a compact placeholder. Re-run identify_payload and update
+       these args if the tool changes. (Placing the supplement at the measured COM
+       assumes the robotiq model's COM ~ the true COM, which holds because the
+       gripper geometry is modeled even though its mass magnitude was too low.) -->
+  <xacro:arg name="gripper_total_mass" default="1.3096"/>
+  <xacro:arg name="gripper_com_x"      default="-0.0021"/>
+  <xacro:arg name="gripper_com_y"      default="-0.0031"/>
+  <xacro:arg name="gripper_com_z"      default="0.0579"/>
+
+  <link name="${tf_prefix_val}gripper_payload_correction">
+    <inertial>
+      <origin xyz="$(arg gripper_com_x) $(arg gripper_com_y) $(arg gripper_com_z)" rpy="0 0 0"/>
+      <!-- supplement = measured total - the ~0.364 kg the robotiq URDF already models -->
+      <mass value="${$(arg gripper_total_mass) - 0.364}"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+  </link>
+  <joint name="${tf_prefix_val}gripper_payload_correction_joint" type="fixed">
+    <parent link="tool0"/>
+    <child  link="${tf_prefix_val}gripper_payload_correction"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
 </robot>
