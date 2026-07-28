@@ -251,8 +251,15 @@ ARG CRISP_CONTROLLERS_VERSION=2.4.1
 COPY . src/crisp_controllers_demos
 
 RUN git clone --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
-RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
-RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
+# crisp_py pinned to v3.6.0 (== the default-branch HEAD the working build used)
+# so image builds are reproducible instead of tracking a moving default branch.
+RUN git clone --branch v3.6.0 --depth 1 https://github.com/utiasDSL/crisp_py.git src/crisp_py
+# ros2_robotiq_gripper pinned to the humble-branch commit the working build used.
+# Its only tag (0.0.1) predates this branch, so pin by commit: a full clone (no
+# --depth) then checkout stays valid even after the humble branch advances. The
+# vcs import below reads ros2_robotiq_gripper.humble.repos from this checkout.
+RUN git clone https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper \
+    && git -C src/ros2_robotiq_gripper checkout a29c69b7516b7a97737b5e43e118e6598ace0832
 
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt update \
