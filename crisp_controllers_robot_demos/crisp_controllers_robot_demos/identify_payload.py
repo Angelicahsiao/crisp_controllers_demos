@@ -268,7 +268,7 @@ class IdentifyPayload(Node):
         )
 
         data = {
-            "mass": round(mass, 6),
+            "mass": round(float(mass), 6),
             "com": [round(float(v), 6) for v in com],
             "com_frame": self._sensor_frame,
             "force_bias": [round(float(v), 6) for v in f_bias],
