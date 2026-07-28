@@ -12,6 +12,9 @@
   <!-- external_effort_node: gravity-free joint effort via Pinocchio -->
   <depend>pinocchio</depend>
   <depend>python3-numpy</depend>
+  <!-- identify_payload: wrist F/T + TF payload mass/COM identification -->
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

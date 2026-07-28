@@ -31,6 +31,7 @@ setup(
             "crisp_py_franka_hand_adapter = crisp_controllers_robot_demos.crisp_py_franka_hand_adapter:main",
             "external_effort_node = crisp_controllers_robot_demos.external_effort_node:main",
             "calibrate_external_effort = crisp_controllers_robot_demos.calibrate_external_effort:main",
+            "identify_payload = crisp_controllers_robot_demos.identify_payload:main",
         ],
     },
 )
