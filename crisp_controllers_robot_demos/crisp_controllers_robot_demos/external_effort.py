@@ -1,19 +1,24 @@
-"""Estimate external joint effort by subtracting model gravity torque.
+"""Estimate external joint effort from the measured signal and model gravity.
 
-Current-derived joint effort (e.g. the UR's /joint_states effort) is the *total*
-torque, including the torque spent holding the arm against gravity. This builds
-a Pinocchio model from the robot URDF (ideally /robot_description, which already
-carries the gripper masses), locks the non-arm joints, and subtracts the
-gravity term g(q):
+The UR's /joint_states "effort" is filled from RTDE actual_current, i.e. motor
+CURRENT (Amps), not torque (ur_robot_driver: readData(..., "actual_current",
+urcl_joint_efforts_)). To get a gravity-free external *torque* we convert the
+current to torque with a per-joint gain and subtract the Pinocchio gravity:
 
-    tau_ext = tau_measured - (scale * g(q) + offset)
+    tau_ext[Nm] = effort_gain * I  -  g(q)  -  offset
 
-scale is fixed at 1.0 — g(q) is the physically correct RNEA gravity and must not
-be rescaled — and offset is an optional per-joint constant (current bias / static
-friction) fitted from contact-free motion. For g(q) to be accurate the URDF must
-carry the true link masses, including the tool payload (see identify_payload).
-Quasi-static assumption: inertial/Coriolis torques are not subtracted, so
-readings during fast motion overestimate contact.
+- effort_gain (k, Nm/A): per-joint current->torque constant (torque constant x
+  gear ratio, ~10-12 for the UR7e big joints). The gravity term keeps coefficient
+  1 — g(q) is the physically correct RNEA torque and is not rescaled; the unit
+  conversion lives on the measurement, where it physically belongs.
+- offset (Nm): per-joint constant (current bias / static friction).
+
+Both are identified from contact-free motion (see fit_calibration /
+calibrate_external_effort). CALIBRATION IS REQUIRED: with effort_gain=1 the
+current and the Nm gravity are in different units and the output is meaningless.
+For g(q) to be accurate the URDF must carry the true link masses, including the
+tool payload (see identify_payload). Quasi-static assumption: inertial/Coriolis
+torques are not subtracted, so readings during fast motion overestimate contact.
 
 This module lives in the robot bring-up package so the (heavy) pinocchio
 dependency stays on the robot side; crisp_gym consumes the published topic as a
@@ -34,19 +39,20 @@ class ExternalEffortEstimator:
         self,
         urdf: str,
         joint_names: list[str],
-        scale: NDArray | None = None,
+        effort_gain: NDArray | None = None,
         offset: NDArray | None = None,
     ):
         """Build the estimator.
 
         Args:
             urdf: URDF as an XML string (e.g. from /robot_description).
-            joint_names: Actuated arm joints, in the order tau/q are provided.
+            joint_names: Actuated arm joints, in the order I/q are provided.
                 All other movable joints in the URDF (e.g. gripper fingers) are
                 locked at their neutral configuration, so their mass still loads
                 the wrist.
-            scale: Optional per-joint calibration gain a (default 1).
-            offset: Optional per-joint calibration offset b (default 0).
+            effort_gain: Optional per-joint current->torque gain k (Nm/A,
+                default 1 — but 1 gives meaningless output; calibrate first).
+            offset: Optional per-joint calibration offset (Nm, default 0).
         """
         full_model = pin.buildModelFromXML(urdf)
         lock_ids = [
@@ -65,7 +71,9 @@ class ExternalEffortEstimator:
             [self.model.joints[self.model.getJointId(n)].idx_q for n in joint_names]
         )
         n = len(joint_names)
-        self.scale = np.ones(n) if scale is None else np.asarray(scale, dtype=float)
+        self.effort_gain = (
+            np.ones(n) if effort_gain is None else np.asarray(effort_gain, dtype=float)
+        )
         self.offset = np.zeros(n) if offset is None else np.asarray(offset, dtype=float)
 
     def gravity_effort(self, q: NDArray) -> NDArray:
@@ -75,26 +83,37 @@ class ExternalEffortEstimator:
         tau_g = pin.computeGeneralizedGravity(self.model, self.data, q_pin)
         return tau_g[self._q_index]
 
-    def external_effort(self, q: NDArray, tau_measured: NDArray) -> NDArray:
-        """tau_ext = tau_measured - (scale * g(q) + offset)."""
-        return np.asarray(tau_measured) - (self.scale * self.gravity_effort(q) + self.offset)
+    def external_effort(self, q: NDArray, currents: NDArray) -> NDArray:
+        """tau_ext = effort_gain * I - g(q) - offset (I = measured current)."""
+        return (
+            self.effort_gain * np.asarray(currents)
+            - self.gravity_effort(q)
+            - self.offset
+        )
 
-    def fit_calibration(self, qs: NDArray, taus_measured: NDArray) -> tuple[NDArray, NDArray]:
-        """Fit the per-joint constant offset from contact-free samples.
+    def fit_calibration(self, qs: NDArray, currents: NDArray) -> tuple[NDArray, NDArray]:
+        """Fit the per-joint current->torque gain and offset from contact-free samples.
 
-        Record (q, tau_measured) pairs while the arm moves slowly with nothing
-        touching it, then fit only the constant bias per joint:
+        Record (q, I) pairs while the arm moves slowly with nothing touching it.
+        Contact-free, effort_gain*I - g(q) - offset == 0, so per joint we fit
 
-            offset_j = mean(tau_measured_j - g(q)_j),   scale fixed at 1.0
+            g(q)_j ~ k_j * I_j + c_j     ->   effort_gain_j = k_j, offset_j = -c_j
 
-        g(q) is not rescaled: the Pinocchio RNEA gravity is already the correct
-        gravity torque (given the URDF masses), so a fitted gain would distort a
-        correct model. A pose-dependent residual instead points to a wrong URDF
-        mass (e.g. an unmodelled payload). Stores and returns (scale, offset).
+        by least squares. Identifying k_j needs gravity to load the joint across
+        the samples (drive shoulder_lift/elbow/wrist_1/wrist_2 through their
+        gravity span); near-vertical joints (shoulder_pan, wrist_3) are barely
+        loaded and their k is not identifiable here — the caller should fall back
+        to a nominal gain for those. Stores and returns (effort_gain, offset).
         """
         qs = np.asarray(qs)
-        taus = np.asarray(taus_measured)
+        currents = np.asarray(currents)
         gravity = np.stack([self.gravity_effort(q) for q in qs])
-        self.scale = np.ones(gravity.shape[1])
-        self.offset = (taus - gravity).mean(axis=0)
-        return self.scale, self.offset
+        n = gravity.shape[1]
+        k = np.ones(n)
+        c = np.zeros(n)
+        for j in range(n):
+            A = np.stack([currents[:, j], np.ones(len(qs))], axis=1)
+            (k[j], c[j]), *_ = np.linalg.lstsq(A, gravity[:, j], rcond=None)
+        self.effort_gain = k
+        self.offset = -c
+        return self.effort_gain, self.offset

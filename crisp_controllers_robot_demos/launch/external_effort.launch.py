@@ -55,7 +55,8 @@ def generate_launch_description():
                 "calibration_file",
                 default_value="",
                 description="YAML from calibrate_external_effort with per-joint "
-                "scale/offset; empty = uncalibrated (scale 1, offset 0).",
+                "effort_gain/offset; empty = uncalibrated (gain 1 = meaningless, "
+                "since /joint_states effort is current not torque).",
             ),
             DeclareLaunchArgument(
                 "joint_names",

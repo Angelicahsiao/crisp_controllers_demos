@@ -1,16 +1,18 @@
 """ROS node publishing gravity-free external joint effort.
 
 Subscribes the latched /robot_description and /joint_states, builds a Pinocchio
-gravity model once, and publishes tau_ext = tau_measured - g(q) as a
-std_msgs/Float32MultiArray. crisp_gym records it via a plain float32_array
-sensor (no pinocchio dependency on the crisp_gym side).
+gravity model once, and publishes tau_ext = effort_gain * I - g(q) - offset as a
+std_msgs/Float32MultiArray (I = /joint_states effort, which is motor current on
+the UR). crisp_gym records it via a plain float32_array sensor (no pinocchio
+dependency on the crisp_gym side).
 
 Parameters:
     joint_names (string[])   REQUIRED — actuated arm joints, in order.
     joint_state_topic (str)  default "joint_states".
     output_topic (str)       default "external_joint_effort".
-    scale (double[])         optional per-joint calibration gain (default all 1).
-    offset (double[])        optional per-joint calibration offset (default all 0).
+    effort_gain (double[])   per-joint current->torque gain k, Nm/A (default all
+                             1 — calibrate first, 1 gives meaningless output).
+    offset (double[])        optional per-joint offset, Nm (default all 0).
 
 Namespaced joint names: a node namespace prefix (e.g. "right") is prepended to
 each configured joint name when matching /joint_states, mirroring crisp_py.
@@ -57,18 +59,26 @@ class ExternalEffortNode(Node):
         output_topic = self.declare_parameter("output_topic", "external_joint_effort").value
 
         n = len(self._joint_names)
-        scale = list(self.declare_parameter("scale", [1.0] * n).value)
+        # effort_gain (k, Nm/A): per-joint current->torque gain; 1.0 gives
+        # meaningless output because /joint_states effort is current, not torque.
+        effort_gain = list(self.declare_parameter("effort_gain", [1.0] * n).value)
         offset = list(self.declare_parameter("offset", [0.0] * n).value)
 
         # A calibration YAML (written by calibrate_external_effort) overrides
-        # the scale/offset parameters.
+        # the effort_gain/offset parameters.
         calibration_file = self.declare_parameter("calibration_file", "").value
         if calibration_file:
             import yaml
 
             with open(calibration_file) as f:
                 calib = yaml.safe_load(f)
-            scale = list(calib["scale"])
+            if "effort_gain" not in calib:
+                raise RuntimeError(
+                    f"calibration_file '{calibration_file}' has no 'effort_gain' "
+                    "key. It is an old scale-based calibration; re-run "
+                    "calibrate_external_effort to produce the current->torque gain."
+                )
+            effort_gain = list(calib["effort_gain"])
             offset = list(calib["offset"])
             calib_joints = calib.get("joint_names")
             if calib_joints is not None and [
@@ -84,10 +94,10 @@ class ExternalEffortNode(Node):
                 f"({calib.get('n_samples', '?')} samples)."
             )
 
-        for name, arr in (("scale", scale), ("offset", offset)):
+        for name, arr in (("effort_gain", effort_gain), ("offset", offset)):
             if len(arr) != n:
                 raise RuntimeError(f"'{name}' has {len(arr)} values but joint_names has {n}.")
-        self._scale = np.asarray(scale, dtype=float)
+        self._effort_gain = np.asarray(effort_gain, dtype=float)
         self._offset = np.asarray(offset, dtype=float)
 
         # matched joint index in the JointState message (filled on first msg)
@@ -127,12 +137,12 @@ class ExternalEffortNode(Node):
         prefixed = [self._prefix + n for n in self._joint_names]
         try:
             self._estimator = ExternalEffortEstimator(
-                self._urdf, prefixed, scale=self._scale, offset=self._offset
+                self._urdf, prefixed, effort_gain=self._effort_gain, offset=self._offset
             )
         except ValueError:
             # namespace prefix may already be baked into the URDF joint names
             self._estimator = ExternalEffortEstimator(
-                self._urdf, list(self._joint_names), scale=self._scale, offset=self._offset
+                self._urdf, list(self._joint_names), effort_gain=self._effort_gain, offset=self._offset
             )
             prefixed = list(self._joint_names)
         self._model_joint_names = prefixed
