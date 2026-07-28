@@ -84,8 +84,12 @@ ros2 run crisp_controllers_robot_demos calibrate_external_effort \
   -p output_file:=/home/ros/ros2_ws/src/crisp_controllers_demos/external_effort_calibration.yaml
 ```
 
-Move the arm slowly with **nothing touching it**, actively driving each joint
-through motions that change its gravity torque:
+**Move, then PAUSE** at each pose (nothing touching the arm): samples are only
+recorded when the arm is *settled* (`vel_threshold`, default 0.02 rad/s) — mid-
+motion current is acceleration + kinetic friction, not gravity, and corrupts the
+gain. Dwell a second or two at each pose, driving each joint through a wide range
+of its gravity torque (the wider the span, the better the gain, especially for
+`elbow`):
 
 | Joint | Motion needed for a good fit |
 |---|---|

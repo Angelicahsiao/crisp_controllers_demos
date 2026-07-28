@@ -13,10 +13,13 @@ URDF must carry the true masses, including the tool payload (see identify_payloa
 The result is written to a YAML that external_effort_node loads via its
 'calibration_file' parameter.
 
-Recording stops when you press ENTER (default) or after 'duration' seconds as a
-safety cap. Identifying k needs gravity to LOAD each joint differently across the
-samples, so actively drive each joint through motions that change its gravity
-torque (watch the live per-joint "span"):
+Samples are only taken when the arm is SETTLED (all recorded joints below
+'vel_threshold'): the fit assumes each sample is a static holding point
+(current = gravity/k + stiction); sampling mid-motion injects acceleration and
+kinetic friction and corrupts the gain. So MOVE, then PAUSE and dwell a moment at
+each pose. Recording stops when you press ENTER (default) or after 'duration'
+seconds. Identifying k needs gravity to LOAD each joint differently across the
+poses, so cover each joint's gravity range (watch the live per-joint "span"):
     - shoulder_lift : raise/lower the whole arm, horizontal -> up -> down.
     - elbow         : fully fold and fully extend the elbow.
     - wrist_1       : pitch the wrist up and down.
@@ -39,6 +42,8 @@ Parameters:
     stop_on_key (bool)       stop when ENTER is pressed (default True).
     duration (double)        max recording seconds / safety cap (default 120).
     sample_rate (double)     sampling rate in Hz (default 5).
+    vel_threshold (double)   max |joint velocity| (rad/s) to count as settled;
+                             samples are only recorded below it (default 0.02).
     min_span (double)        gravity span (Nm) below which a joint's gain is
                              unidentifiable, so it uses the nominal gain and only
                              its offset is fit (default 1).
@@ -78,6 +83,10 @@ class CalibrateExternalEffort(Node):
         self._duration = self.declare_parameter("duration", 120.0).value
         self._sample_rate = self.declare_parameter("sample_rate", 5.0).value
         self._min_span = self.declare_parameter("min_span", 1.0).value
+        # Only record when the arm is settled: the gain fit assumes each sample is
+        # a STATIC holding point (current = gravity/k + stiction). Sampling while
+        # moving injects acceleration + kinetic friction and corrupts the gain.
+        self._vel_threshold = self.declare_parameter("vel_threshold", 0.02).value
         self._output_file = self.declare_parameter(
             "output_file", "external_effort_calibration.yaml"
         ).value
@@ -112,7 +121,9 @@ class CalibrateExternalEffort(Node):
 
         self.get_logger().info(
             f"Waiting for /robot_description and '{joint_state_topic}'...\n"
-            "  Move the arm SLOWLY through diverse poses, nothing touching it:\n"
+            "  MOVE then PAUSE: samples are only taken when the arm is settled, so\n"
+            "  dwell a second or two at each pose. Nothing touching the arm.\n"
+            "  Cover diverse poses across each joint's gravity range:\n"
             "    shoulder_lift: raise/lower the arm | elbow: fold/extend\n"
             "    wrist_1: pitch up/down | wrist_2: ROLL so its axis tilts\n"
             "  (shoulder_pan / wrist_3 can't be gravity-excited — that's fine.)\n"
@@ -188,6 +199,19 @@ class CalibrateExternalEffort(Node):
                 throttle_duration_sec=5.0,
             )
             return  # a NaN on any recorded joint would poison the fit
+
+        # Only record STATIC holding points: if any recorded joint is moving, the
+        # current is dominated by acceleration + kinetic friction, not gravity, and
+        # corrupts the gain fit. Move the arm, then PAUSE and let it settle.
+        if len(msg.velocity) > max(self._msg_index):
+            vel = np.array([msg.velocity[i] for i in self._msg_index])
+            if np.max(np.abs(vel)) > self._vel_threshold:
+                self.get_logger().info(
+                    "  ...moving, waiting for the arm to settle before sampling.",
+                    throttle_duration_sec=2.0,
+                )
+                return
+
         self._qs.append(q)
         self._taus.append(tau)
         self._gravity.append(self._estimator.gravity_effort(q))
