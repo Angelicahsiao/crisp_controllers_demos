@@ -60,7 +60,6 @@ import threading
 import numpy as np
 import rclpy
 import yaml
-from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -68,13 +67,13 @@ from std_msgs.msg import String
 
 from crisp_controllers_robot_demos.external_effort import ExternalEffortEstimator
 
-# Default calibration path — external_effort.launch.py auto-loads this same file,
-# so calibrating with the default output makes the launch pick it up with no args.
+# Default calibration path in the SOURCE tree (resolved from this file, which
+# --symlink-install points into the bind-mounted source), so the calibration
+# persists across container rebuilds. external_effort.launch.py auto-loads this
+# same path, so calibrating with the default makes the launch pick it up.
+_PKG_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 DEFAULT_CALIBRATION = os.path.join(
-    get_package_share_directory("crisp_controllers_robot_demos"),
-    "config",
-    "ur",
-    "external_effort_calibration.yaml",
+    _PKG_DIR, "config", "ur", "external_effort_calibration.yaml"
 )
 
 

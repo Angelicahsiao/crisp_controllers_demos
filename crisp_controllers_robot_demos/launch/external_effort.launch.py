@@ -19,17 +19,18 @@ Example (UR7e):
 import ast
 import os
 
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+# Resolve the calibration path from the SOURCE tree (this file), not the install
+# share: with --symlink-install realpath(__file__) points into the bind-mounted
+# source, so a calibration written here persists across container rebuilds and
+# both calibrate_external_effort and this launch agree on the location.
+_PKG_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 DEFAULT_CALIBRATION = os.path.join(
-    get_package_share_directory("crisp_controllers_robot_demos"),
-    "config",
-    "ur",
-    "external_effort_calibration.yaml",
+    _PKG_DIR, "config", "ur", "external_effort_calibration.yaml"
 )
 
 
