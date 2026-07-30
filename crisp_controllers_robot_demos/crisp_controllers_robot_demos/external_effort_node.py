@@ -100,6 +100,14 @@ class ExternalEffortNode(Node):
         self._effort_gain = np.asarray(effort_gain, dtype=float)
         self._offset = np.asarray(offset, dtype=float)
 
+        if not calibration_file and np.allclose(self._effort_gain, 1.0):
+            self.get_logger().warning(
+                "Running UNCALIBRATED (effort_gain = 1). /joint_states effort is "
+                "motor current, not torque, so the output is meaningless until you "
+                "run calibrate_external_effort and load its YAML (auto-loaded from "
+                "config/ur/external_effort_calibration.yaml)."
+            )
+
         # matched joint index in the JointState message (filled on first msg)
         self._msg_index: list[int] | None = None
         self._estimator = None

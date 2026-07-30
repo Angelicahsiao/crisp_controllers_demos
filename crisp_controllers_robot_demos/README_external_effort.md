@@ -54,9 +54,12 @@ dynamics dependency.
 ## Quick start (UR7e defaults)
 
 ```bash
-# NOTE: meaningless until calibrated — effort_gain defaults to 1 (Amps ≠ Nm).
-ros2 launch crisp_controllers_robot_demos external_effort.launch.py \
-  calibration_file:=/path/to/external_effort_calibration.yaml
+# Auto-loads config/ur/external_effort_calibration.yaml if present.
+# (Calibrate first — uncalibrated output is meaningless: effort_gain=1, Amps≠Nm.)
+ros2 launch crisp_controllers_robot_demos external_effort.launch.py
+
+# Add a live per-joint plot (rqt_plot, one trace per joint):
+ros2 launch crisp_controllers_robot_demos external_effort.launch.py visualize:=true
 ```
 
 Publishes `external_joint_effort` (`Float32MultiArray`, one value per joint in
@@ -78,10 +81,13 @@ identifying its gain needs gravity to **vary** across the samples.
 a UR arm:
 
 ```bash
+# Writes to config/ur/external_effort_calibration.yaml by default (auto-loaded
+# by the launch). min_span:=3 keeps only the well-loaded joints (shoulder_lift,
+# elbow) identified and falls the lightly loaded wrists back to the nominal gain.
 ros2 run crisp_controllers_robot_demos calibrate_external_effort \
   --ros-args \
   -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \
-  -p output_file:=/home/ros/ros2_ws/src/crisp_controllers_demos/external_effort_calibration.yaml
+  -p min_span:=3.0
 ```
 
 **Move, then PAUSE** at each pose (nothing touching the arm): samples are only
@@ -108,15 +114,23 @@ The final report prints per-joint `gain` (Nm/A, ~10–12 for the big joints),
 `offset`, `gravity_span` and `residual_rms` (roughly the noise floor — a large
 value means that joint was poorly excited or friction-dominated).
 
-**2. Launch the node with the calibration:**
+The default `output_file` is `config/ur/external_effort_calibration.yaml`, which
+the launch **auto-loads** — so calibrating with the default and then launching
+needs no `calibration_file:` argument.
+
+**2. Launch the node (auto-loads the calibration):**
 
 ```bash
+ros2 launch crisp_controllers_robot_demos external_effort.launch.py
+# or, with a live plot / an explicit file:
 ros2 launch crisp_controllers_robot_demos external_effort.launch.py \
+  visualize:=true \
   calibration_file:=/path/to/external_effort_calibration.yaml
 ```
 
 The node checks that the calibration was fitted for the same joints and then
-uses its `effort_gain`/`offset` instead of the defaults.
+uses its `effort_gain`/`offset` instead of the defaults. With no calibration it
+warns and runs uncalibrated (`effort_gain = 1`, meaningless).
 
 **Re-calibrate whenever the end-effector mass changes** (different gripper,
 added camera, tool payload).

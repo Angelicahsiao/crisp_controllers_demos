@@ -47,22 +47,35 @@ Parameters:
     min_span (double)        gravity span (Nm) below which a joint's gain is
                              unidentifiable, so it uses the nominal gain and only
                              its offset is fit (default 1).
-    output_file (str)        YAML path (default external_effort_calibration.yaml).
+    output_file (str)        YAML path. Default is config/ur/
+                             external_effort_calibration.yaml, which
+                             external_effort.launch.py auto-loads.
     joint_state_topic (str)  default "joint_states".
 """
 
+import os
 import sys
 import threading
 
 import numpy as np
 import rclpy
 import yaml
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 from crisp_controllers_robot_demos.external_effort import ExternalEffortEstimator
+
+# Default calibration path — external_effort.launch.py auto-loads this same file,
+# so calibrating with the default output makes the launch pick it up with no args.
+DEFAULT_CALIBRATION = os.path.join(
+    get_package_share_directory("crisp_controllers_robot_demos"),
+    "config",
+    "ur",
+    "external_effort_calibration.yaml",
+)
 
 
 class CalibrateExternalEffort(Node):
@@ -88,7 +101,7 @@ class CalibrateExternalEffort(Node):
         # moving injects acceleration + kinetic friction and corrupts the gain.
         self._vel_threshold = self.declare_parameter("vel_threshold", 0.02).value
         self._output_file = self.declare_parameter(
-            "output_file", "external_effort_calibration.yaml"
+            "output_file", DEFAULT_CALIBRATION
         ).value
         joint_state_topic = self.declare_parameter(
             "joint_state_topic", "joint_states"

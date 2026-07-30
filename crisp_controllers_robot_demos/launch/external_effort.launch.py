@@ -1,22 +1,36 @@
 """Launch the external joint-effort estimator node.
 
-Publishes gravity-free joint effort (tau_ext = tau_measured - g(q)) on
-`external_joint_effort` (std_msgs/Float32MultiArray). crisp_gym records it as a
+Publishes gravity-free joint effort (tau_ext = effort_gain * I - g(q) - offset)
+on `external_joint_effort` (std_msgs/Float32MultiArray); I is /joint_states
+effort, which is motor current on the UR. crisp_gym records it as a
 float32_array sensor. Requires the robot bring-up to publish /robot_description
-and /joint_states (with current-derived effort).
+and /joint_states.
+
+The calibration is auto-loaded: with no explicit `calibration_file`, the launch
+uses config/ur/external_effort_calibration.yaml (written there by
+calibrate_external_effort) if it exists. Set `visualize:=true` to open rqt_plot
+with one live trace per joint.
 
 Example (UR7e):
     ros2 launch crisp_controllers_robot_demos external_effort.launch.py \\
-        joint_names:="['shoulder_pan_joint','shoulder_lift_joint','elbow_joint',\\
-'wrist_1_joint','wrist_2_joint','wrist_3_joint']"
+        visualize:=true
 """
 
 import ast
+import os
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+DEFAULT_CALIBRATION = os.path.join(
+    get_package_share_directory("crisp_controllers_robot_demos"),
+    "config",
+    "ur",
+    "external_effort_calibration.yaml",
+)
 
 
 def _launch_setup(context, *args, **kwargs):
@@ -25,8 +39,19 @@ def _launch_setup(context, *args, **kwargs):
     joint_state_topic = LaunchConfiguration("joint_state_topic").perform(context)
     joint_names = ast.literal_eval(LaunchConfiguration("joint_names").perform(context))
     calibration_file = LaunchConfiguration("calibration_file").perform(context)
+    visualize = LaunchConfiguration("visualize").perform(context).lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
-    return [
+    # Auto-load: no explicit file -> use the canonical calibration path if present,
+    # so `ros2 launch ... external_effort.launch.py` just works after calibrating.
+    # If it's missing the node runs uncalibrated (gain 1 = meaningless) and warns.
+    if not calibration_file and os.path.exists(DEFAULT_CALIBRATION):
+        calibration_file = DEFAULT_CALIBRATION
+
+    nodes = [
         Node(
             package="crisp_controllers_robot_demos",
             executable="external_effort_node",
@@ -44,6 +69,22 @@ def _launch_setup(context, *args, **kwargs):
         )
     ]
 
+    if visualize:
+        topic = f"/{namespace}/{output_topic}" if namespace else f"/{output_topic}"
+        # One rqt_plot trace per joint (each element of the Float32MultiArray).
+        fields = [f"{topic}/data[{i}]" for i in range(len(joint_names))]
+        nodes.append(
+            Node(
+                package="rqt_plot",
+                executable="rqt_plot",
+                name="external_effort_plot",
+                arguments=fields,
+                output="screen",
+            )
+        )
+
+    return nodes
+
 
 def generate_launch_description():
     return LaunchDescription(
@@ -55,14 +96,20 @@ def generate_launch_description():
                 "calibration_file",
                 default_value="",
                 description="YAML from calibrate_external_effort with per-joint "
-                "effort_gain/offset; empty = uncalibrated (gain 1 = meaningless, "
-                "since /joint_states effort is current not torque).",
+                "effort_gain/offset. Empty auto-loads config/ur/"
+                "external_effort_calibration.yaml if present; with no calibration "
+                "the gain defaults to 1, which is meaningless (effort is current).",
             ),
             DeclareLaunchArgument(
                 "joint_names",
                 default_value="['shoulder_pan_joint','shoulder_lift_joint',"
                 "'elbow_joint','wrist_1_joint','wrist_2_joint','wrist_3_joint']",
                 description="Actuated arm joints, in order (Python list literal).",
+            ),
+            DeclareLaunchArgument(
+                "visualize",
+                default_value="false",
+                description="Open rqt_plot with one live trace per joint's external effort.",
             ),
             OpaqueFunction(function=_launch_setup),
         ]
