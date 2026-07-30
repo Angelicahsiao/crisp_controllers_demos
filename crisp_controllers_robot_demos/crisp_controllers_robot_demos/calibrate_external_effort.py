@@ -257,50 +257,59 @@ class CalibrateExternalEffort(Node):
         n = len(self._model_joint_names)
         ones = np.ones(len(qs))
 
-        # Contact-free: k*I - model - (coulomb*sign(v) + viscous*v) - offset == 0.
-        # Per joint fit  model ~ k*I - coulomb*sign(v) - viscous*v - offset.
-        # The gain k needs gravity variation (span >= min_span); friction needs
-        # motion (vmax >= friction_min_vel). Fit whatever each joint's data supports.
+        # TWO-STAGE fit so the gain is not confounded by motion. On moving samples
+        # current and velocity are collinear (and inertia M*a leaks in), so a joint
+        # combined fit trades the gain against the viscous term. Instead:
+        #   Stage 1 (gain + offset): STATIC samples only (whole arm settled), where
+        #     friction and Coriolis vanish, so gravity == k*I - offset.
+        #   Stage 2 (Coulomb + viscous): that joint's MOVING samples with the gain
+        #     and offset FIXED, so the residual k*I - model - offset is friction(v).
         effort_gain = np.ones(n)
         coulomb = np.zeros(n)
         viscous = np.zeros(n)
         offset = np.zeros(n)
         has_gain = spans >= self._min_span
-        has_fric = vmax >= self._friction_min_vel
+        arm_static = np.max(np.abs(vs), axis=1) < self._friction_min_vel
+        if arm_static.sum() < 10:
+            self.get_logger().warning(
+                f"Only {int(arm_static.sum())} settled samples — also hold the arm "
+                "STILL at several poses (not only sweeps) so the gain fits cleanly."
+            )
+        # Degenerate guard: if there are essentially no static samples, fall back to
+        # all samples for the gain (degraded) rather than failing.
+        stat = arm_static if arm_static.sum() >= 3 else np.ones(len(qs), dtype=bool)
 
+        # Stage 1: gain + offset from static samples (gravity == k*I - offset).
         for j in range(n):
             if not has_gain[j]:
-                continue  # gain-blind (pan/wrist_3): nominal gain applied below
-            if has_fric[j]:
-                A = np.stack(
-                    [currents[:, j], -np.sign(vs[:, j]), -vs[:, j], -ones], axis=1
-                )
-                (k, cf, vf, off), *_ = np.linalg.lstsq(A, model[:, j], rcond=None)
-                effort_gain[j], coulomb[j], viscous[j], offset[j] = k, cf, vf, off
-            else:
-                A = np.stack([currents[:, j], -ones], axis=1)
-                (k, off), *_ = np.linalg.lstsq(A, model[:, j], rcond=None)
-                effort_gain[j], offset[j] = k, off
+                continue
+            A = np.stack([currents[stat, j], -ones[stat]], axis=1)
+            (k, off), *_ = np.linalg.lstsq(A, gravity[stat, j], rcond=None)
+            effort_gain[j], offset[j] = k, off
 
-        # Gain-blind joints use the mean identified gain, then fit friction/offset
-        # (or just offset) from the residual k*I - model.
+        # Gain-blind joints (pan, wrist_3): nominal gain, offset from static residual.
         nominal = float(np.mean(effort_gain[has_gain])) if has_gain.any() else 1.0
         for j in range(n):
             if has_gain[j]:
                 continue
             effort_gain[j] = nominal
-            resid = effort_gain[j] * currents[:, j] - model[:, j]
-            if has_fric[j]:
-                A = np.stack([np.sign(vs[:, j]), vs[:, j], ones], axis=1)
-                (cf, vf, off), *_ = np.linalg.lstsq(A, resid, rcond=None)
-                coulomb[j], viscous[j], offset[j] = cf, vf, off
-            else:
-                offset[j] = float(np.mean(resid))
+            offset[j] = float(np.mean(effort_gain[j] * currents[stat, j] - gravity[stat, j]))
             self.get_logger().warning(
                 f"'{self._model_joint_names[j]}': gravity span {spans[j]:.2f} Nm "
                 f"< {self._min_span} — gain unidentifiable, using nominal "
                 f"{nominal:.2f} Nm/A (expected for pan/wrist_3)."
             )
+
+        # Stage 2: Coulomb + viscous from each joint's MOVING samples, gain fixed.
+        # residual = k*I - model - offset ~ coulomb*sign(v) + viscous*v.
+        for j in range(n):
+            moving = np.abs(vs[:, j]) >= self._friction_min_vel
+            if moving.sum() < 10:
+                continue
+            r = effort_gain[j] * currents[moving, j] - model[moving, j] - offset[j]
+            A = np.stack([np.sign(vs[moving, j]), vs[moving, j]], axis=1)
+            (cf, vf), *_ = np.linalg.lstsq(A, r, rcond=None)
+            coulomb[j], viscous[j] = cf, vf
 
         residual = (
             effort_gain * currents - model - (coulomb * np.sign(vs) + viscous * vs) - offset
