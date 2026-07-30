@@ -7,21 +7,23 @@ against gravity.
 
 The UR's `/joint_states` **"effort" is motor current (Amps), not torque** — the
 driver fills it from RTDE `actual_current`. So the estimator converts current to
-torque with a per-joint gain and subtracts the Pinocchio gravity:
+torque with a per-joint gain and subtracts the model dynamics and joint friction
+(using `/joint_states` **velocity**):
 
 ```
-tau_ext[Nm] = effort_gain * I  -  g(q)  -  offset
+tau_ext[Nm] = effort_gain * I  -  rnea(q, v, 0)  -  friction(v)  -  offset
 ```
 
 - `I` — measured current from `/joint_states` effort (Amps).
-- `effort_gain` (`k`, Nm/A) — per-joint current→torque constant (torque constant
-  × gear ratio, ~10–12 for the UR7e big joints). The unit conversion lives here,
-  on the measurement.
-- `g(q)` — gravity torque from the robot model (built from the live
-  `/robot_description`), coefficient **1** — the RNEA gravity is physically
-  correct and is **not** rescaled. Only as accurate as the URDF masses (see the
-  payload note).
-- `offset` (Nm) — optional per-joint constant (current bias / static friction).
+- `effort_gain` (`k`, Nm/A) — per-joint current→torque constant (~10–12 for the
+  UR7e big joints). The unit conversion lives here, on the measurement.
+- `rnea(q, v, 0)` — full inverse dynamics with zero acceleration = gravity `g(q)`
+  **plus** the Coriolis/centrifugal term `C(q,v)·v`, coefficient **1**. The
+  inertia term `M(q)·a` is dropped (acceleration would need noisy differentiation)
+  — keep motions slow. Only as accurate as the URDF masses (see the payload note).
+- `friction(v) = coulomb·sign(v) + viscous·v` — the 2-parameter Coulomb+viscous
+  joint-friction model. This is what velocity buys over the quasi-static model.
+- `offset` (Nm) — per-joint constant (current bias / static holding term).
 
 > **Calibration is required, not optional.** With `effort_gain = 1` you would
 > subtract an Nm gravity from an Amp current — meaningless (the gravity-bearing
@@ -90,12 +92,11 @@ ros2 run crisp_controllers_robot_demos calibrate_external_effort \
   -p min_span:=3.0
 ```
 
-**Move, then PAUSE** at each pose (nothing touching the arm): samples are only
-recorded when the arm is *settled* (`vel_threshold`, default 0.02 rad/s) — mid-
-motion current is acceleration + kinetic friction, not gravity, and corrupts the
-gain. Dwell a second or two at each pose, driving each joint through a wide range
-of its gravity torque (the wider the span, the better the gain, especially for
-`elbow`):
+Record **two kinds of motion** (nothing touching the arm) — they identify
+different terms:
+
+- **Static holds** across each joint's gravity range → identify the **gain** `k`.
+  Drive each joint through a wide gravity span (wider = better gain, esp. `elbow`):
 
 | Joint | Motion needed for a good fit |
 |---|---|
@@ -105,14 +106,19 @@ of its gravity torque (the wider the span, the better the gain, especially for
 | `wrist_2` | **roll** the wrist so its axis tilts between vertical and horizontal |
 | `shoulder_pan`, `wrist_3` | rotate about near-vertical axes — gravity barely loads them in **any** pose, so their gain is **unidentifiable**; the script uses the mean of the identified gains and fits only their offset. Expected, not an error. |
 
+- **Slow back-and-forth sweeps** in **both directions** at a couple of speeds →
+  identify **Coulomb** (`sign(v)`) and **viscous** (`v`) friction. Keep it slow —
+  the inertia term `M·a` is not modeled. A joint that never moves
+  (`vmax < friction_min_vel`, default 0.05 rad/s) keeps zero friction.
+
 While recording, the node prints a live **gravity span** per joint
-(`shoulder_lift:4.2OK  elbow:0.3..`). Keep moving a joint until its span is
-several Nm (`OK`); a span below `min_span` (default 1 Nm) means that joint's gain
-falls back to the nominal.
+(`shoulder_lift:4.2OK  elbow:0.3..`). A span below `min_span` (default 1 Nm) means
+that joint's gain falls back to the nominal.
 
 The final report prints per-joint `gain` (Nm/A, ~10–12 for the big joints),
-`offset`, `gravity_span` and `residual_rms` (roughly the noise floor — a large
-value means that joint was poorly excited or friction-dominated).
+`coulomb`, `viscous`, `offset`, `gravity_span`, `velocity_max` and `residual_rms`
+(the noise floor — a large value means that joint was poorly excited or the
+friction model didn't capture it, e.g. hysteretic stiction).
 
 The default `output_file` is `config/ur/external_effort_calibration.yaml`, which
 the launch **auto-loads** — so calibrating with the default and then launching
@@ -129,8 +135,8 @@ ros2 launch crisp_controllers_robot_demos external_effort.launch.py \
 ```
 
 The node checks that the calibration was fitted for the same joints and then
-uses its `effort_gain`/`offset` instead of the defaults. With no calibration it
-warns and runs uncalibrated (`effort_gain = 1`, meaningless).
+uses its `effort_gain`/`offset`/`coulomb`/`viscous` instead of the defaults. With
+no calibration it warns and runs uncalibrated (`effort_gain = 1`, meaningless).
 
 **Re-calibrate whenever the end-effector mass changes** (different gripper,
 added camera, tool payload).
@@ -144,8 +150,9 @@ added camera, tool payload).
 | `joint_names` | UR joint list (launch) | Actuated arm joints, in output order. **Required.** |
 | `joint_state_topic` | `joint_states` | Source topic (must carry effort). |
 | `output_topic` | `external_joint_effort` | Published `Float32MultiArray`. |
-| `calibration_file` | `""` | YAML from the calibration script; empty = `effort_gain 1, offset 0` (meaningless — calibrate). |
-| `effort_gain` / `offset` | `1.0` / `0.0` per joint | Manual per-joint current→torque gain (Nm/A) and offset (Nm); overridden by `calibration_file`. |
+| `calibration_file` | `""` | YAML from the calibration script; empty = `effort_gain 1` (meaningless — calibrate). |
+| `effort_gain` / `offset` | `1.0` / `0.0` per joint | Manual current→torque gain (Nm/A) and offset (Nm); overridden by `calibration_file`. |
+| `coulomb` / `viscous` | `0.0` / `0.0` per joint | Manual Coulomb (Nm) and viscous (Nm/(rad/s)) friction; overridden by `calibration_file`. |
 
 A node namespace (e.g. `right`) is prepended to joint names (`right_...`) when
 matching `/joint_states`, mirroring crisp_py; if the URDF already bakes the
@@ -159,8 +166,9 @@ prefix in, the un-prefixed names are used as a fallback.
 | `stop_on_key` | `True` | Stop recording when ENTER is pressed. |
 | `duration` | `120.0` | Max recording seconds / safety cap when `stop_on_key`. |
 | `sample_rate` | `5.0` | Sampling rate in Hz. |
-| `min_span` | `1.0` | Gravity span (Nm) below which a joint's gain is unidentifiable, so it uses the nominal gain and only its offset is fit. |
-| `output_file` | `external_effort_calibration.yaml` | Where to write the fit. |
+| `min_span` | `1.0` | Gravity span (Nm) below which a joint's gain is unidentifiable → nominal gain. |
+| `friction_min_vel` | `0.05` | Max \|velocity\| (rad/s) below which a joint is static → zero friction. |
+| `output_file` | `config/ur/external_effort_calibration.yaml` | Where to write the fit (launch auto-loads this default). |
 | `joint_state_topic` | `joint_states` | Source topic. |
 
 Calibration YAML format:
@@ -169,6 +177,9 @@ Calibration YAML format:
 joint_names:  [shoulder_pan_joint, ...]
 effort_gain:  [12.0, ...]    # per-joint current->torque gain k  [Nm/A]
 offset:       [-0.31, ...]   # per-joint constant bias  [Nm]
+coulomb:      [0.8, ...]     # per-joint Coulomb friction  [Nm]
+viscous:      [0.3, ...]     # per-joint viscous friction  [Nm/(rad/s)]
+velocity_max: [0.4, ...]     # max |velocity| seen while recording [rad/s]
 gravity_span: [0.0, ...]     # how much gravity torque varied while recording [Nm]
 residual_rms: [0.7, ...]     # fit quality per joint [Nm]
 n_samples: 240
@@ -176,14 +187,17 @@ n_samples: 240
 
 ## Limitations
 
-- **Quasi-static.** Only gravity is subtracted — inertial/Coriolis torques are
-  not — so readings during fast motion overestimate contact. Intended for
-  teleop-speed motion and contact detection.
-- **Friction is not modeled.** The `offset` absorbs its static average, but
-  direction-dependent friction remains in the signal (the main residual after
-  calibration).
+- **Inertia is not modeled.** Gravity + Coriolis + friction are subtracted, but
+  the `M(q)·a` term is not (acceleration would need noisy differentiation), so
+  readings during *fast* motion still overestimate contact. Keep motion slow, or
+  move to the momentum-observer formulation which avoids acceleration.
+- **Friction is only approximately modeled.** The Coulomb+viscous model removes
+  the bulk of it, but real joint friction is hysteretic (Stribeck, stick-slip),
+  so a residual band (~1–2 Nm on the big joints) remains — the noise floor for
+  contact thresholds.
 - **Current-derived source.** The UR has no joint torque sensors; treat the
-  output as an estimate, not calibrated Nm.
+  output as an estimate, not calibrated Nm. `shoulder_pan`/`wrist_3` have no
+  gravity reference, so their reading is amplified friction — least reliable.
 - **Model completeness.** Anything with mass that is not in `/robot_description`
   (a gripper whose URDF mass is too low, a camera, a tool) biases the estimate
   *pose-dependently* — a constant `offset` cannot absorb it. Measure it with

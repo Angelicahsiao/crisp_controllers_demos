@@ -1,10 +1,12 @@
 """ROS node publishing gravity-free external joint effort.
 
 Subscribes the latched /robot_description and /joint_states, builds a Pinocchio
-gravity model once, and publishes tau_ext = effort_gain * I - g(q) - offset as a
-std_msgs/Float32MultiArray (I = /joint_states effort, which is motor current on
-the UR). crisp_gym records it via a plain float32_array sensor (no pinocchio
-dependency on the crisp_gym side).
+model once, and publishes
+    tau_ext = effort_gain * I - rnea(q, v, 0) - friction(v) - offset
+as a std_msgs/Float32MultiArray (I = /joint_states effort = motor current on the
+UR; v = /joint_states velocity). rnea(q,v,0) is gravity + Coriolis; friction(v) =
+coulomb*sign(v) + viscous*v. crisp_gym records it via a plain float32_array
+sensor (no pinocchio dependency on the crisp_gym side).
 
 Parameters:
     joint_names (string[])   REQUIRED — actuated arm joints, in order.
@@ -12,7 +14,9 @@ Parameters:
     output_topic (str)       default "external_joint_effort".
     effort_gain (double[])   per-joint current->torque gain k, Nm/A (default all
                              1 — calibrate first, 1 gives meaningless output).
-    offset (double[])        optional per-joint offset, Nm (default all 0).
+    offset (double[])        per-joint offset, Nm (default all 0).
+    coulomb (double[])       per-joint Coulomb friction, Nm (default all 0).
+    viscous (double[])       per-joint viscous friction, Nm/(rad/s) (default 0).
 
 Namespaced joint names: a node namespace prefix (e.g. "right") is prepended to
 each configured joint name when matching /joint_states, mirroring crisp_py.
@@ -63,9 +67,12 @@ class ExternalEffortNode(Node):
         # meaningless output because /joint_states effort is current, not torque.
         effort_gain = list(self.declare_parameter("effort_gain", [1.0] * n).value)
         offset = list(self.declare_parameter("offset", [0.0] * n).value)
+        # Coulomb + viscous joint friction (default 0 = no friction compensation).
+        coulomb = list(self.declare_parameter("coulomb", [0.0] * n).value)
+        viscous = list(self.declare_parameter("viscous", [0.0] * n).value)
 
         # A calibration YAML (written by calibrate_external_effort) overrides
-        # the effort_gain/offset parameters.
+        # the effort_gain/offset/coulomb/viscous parameters.
         calibration_file = self.declare_parameter("calibration_file", "").value
         if calibration_file:
             import yaml
@@ -80,6 +87,9 @@ class ExternalEffortNode(Node):
                 )
             effort_gain = list(calib["effort_gain"])
             offset = list(calib["offset"])
+            # Friction fields are optional (older calibrations have no friction).
+            coulomb = list(calib.get("coulomb", [0.0] * n))
+            viscous = list(calib.get("viscous", [0.0] * n))
             calib_joints = calib.get("joint_names")
             if calib_joints is not None and [
                 j.removeprefix(self._prefix) for j in calib_joints
@@ -94,11 +104,18 @@ class ExternalEffortNode(Node):
                 f"({calib.get('n_samples', '?')} samples)."
             )
 
-        for name, arr in (("effort_gain", effort_gain), ("offset", offset)):
+        for name, arr in (
+            ("effort_gain", effort_gain),
+            ("offset", offset),
+            ("coulomb", coulomb),
+            ("viscous", viscous),
+        ):
             if len(arr) != n:
                 raise RuntimeError(f"'{name}' has {len(arr)} values but joint_names has {n}.")
         self._effort_gain = np.asarray(effort_gain, dtype=float)
         self._offset = np.asarray(offset, dtype=float)
+        self._coulomb = np.asarray(coulomb, dtype=float)
+        self._viscous = np.asarray(viscous, dtype=float)
 
         if not calibration_file and np.allclose(self._effort_gain, 1.0):
             self.get_logger().warning(
@@ -143,14 +160,18 @@ class ExternalEffortNode(Node):
         from crisp_controllers_robot_demos.external_effort import ExternalEffortEstimator
 
         prefixed = [self._prefix + n for n in self._joint_names]
+        kwargs = dict(
+            effort_gain=self._effort_gain,
+            offset=self._offset,
+            coulomb=self._coulomb,
+            viscous=self._viscous,
+        )
         try:
-            self._estimator = ExternalEffortEstimator(
-                self._urdf, prefixed, effort_gain=self._effort_gain, offset=self._offset
-            )
+            self._estimator = ExternalEffortEstimator(self._urdf, prefixed, **kwargs)
         except ValueError:
             # namespace prefix may already be baked into the URDF joint names
             self._estimator = ExternalEffortEstimator(
-                self._urdf, list(self._joint_names), effort_gain=self._effort_gain, offset=self._offset
+                self._urdf, list(self._joint_names), **kwargs
             )
             prefixed = list(self._joint_names)
         self._model_joint_names = prefixed
@@ -182,7 +203,13 @@ class ExternalEffortNode(Node):
 
         q = np.array([msg.position[i] for i in self._msg_index], dtype=float)
         tau = np.array([msg.effort[i] for i in self._msg_index], dtype=float)
-        tau_ext = self._estimator.external_effort(q, tau)
+        # Velocity drives the Coriolis + friction terms; if the message omits it
+        # (or is too short), fall back to zeros (quasi-static / gravity-only).
+        if len(msg.velocity) > max(self._msg_index):
+            v = np.array([msg.velocity[i] for i in self._msg_index], dtype=float)
+        else:
+            v = np.zeros_like(q)
+        tau_ext = self._estimator.external_effort(q, v, tau)
 
         out = Float32MultiArray()
         out.data = [float(v) for v in tau_ext]

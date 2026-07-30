@@ -1,52 +1,47 @@
 """Record contact-free joint effort samples and fit the external-effort calibration.
 
-The UR's /joint_states "effort" is motor CURRENT (Amps), not torque, so we fit a
-per-joint current->torque gain k (Nm/A) and a constant offset such that,
-contact-free, k*I - g(q) - offset == 0. This script records (q, I) while the arm
-moves slowly with NOTHING touching it and per joint least-squares fits
+The UR's /joint_states "effort" is motor CURRENT (Amps), not torque, so per joint
+we fit a current->torque gain k (Nm/A), Coulomb+viscous friction and a constant
+offset such that, contact-free,
 
-    g(q)_j ~ k_j * I_j + c_j   ->   effort_gain_j = k_j,  offset_j = -c_j
+    k*I - rnea(q, v, 0) - (coulomb*sign(v) + viscous*v) - offset == 0
 
-g(q) keeps coefficient 1 (the RNEA gravity is physically correct); the unit
-conversion lives on the current, where it belongs. For g(q) to be accurate the
-URDF must carry the true masses, including the tool payload (see identify_payload).
-The result is written to a YAML that external_effort_node loads via its
-'calibration_file' parameter.
+rnea(q, v, 0) is gravity + Coriolis (coefficient 1; the model is physically
+correct). This script records (q, v, I) with NOTHING touching the arm and
+least-squares fits  model ~ k*I - coulomb*sign(v) - viscous*v - offset. For the
+model to be accurate the URDF must carry the true masses, including the tool
+payload (see identify_payload). The YAML is loaded by external_effort_node.
 
-Samples are only taken when the arm is SETTLED (all recorded joints below
-'vel_threshold'): the fit assumes each sample is a static holding point
-(current = gravity/k + stiction); sampling mid-motion injects acceleration and
-kinetic friction and corrupts the gain. So MOVE, then PAUSE and dwell a moment at
-each pose. Recording stops when you press ENTER (default) or after 'duration'
-seconds. Identifying k needs gravity to LOAD each joint differently across the
-poses, so cover each joint's gravity range (watch the live per-joint "span"):
+Record BOTH, per joint, because they identify different terms:
+  (1) STATIC holds across each joint's gravity range -> identify the gain k:
     - shoulder_lift : raise/lower the whole arm, horizontal -> up -> down.
     - elbow         : fully fold and fully extend the elbow.
     - wrist_1       : pitch the wrist up and down.
-    - wrist_2       : ROLL the wrist so its axis tilts between vertical and
-                      horizontal (otherwise its gravity span stays ~0).
+    - wrist_2       : ROLL the wrist so its axis tilts between vertical/horizontal.
     - shoulder_pan and wrist_3 rotate about near-vertical axes: gravity barely
-      loads them in ANY pose, so their k is physically unidentifiable. The script
-      detects this (span below --min_span) and falls back to the mean of the
-      identified gains, fitting only their offset. This is expected, not an error.
+      loads them, so their k is unidentifiable (span < min_span) and falls back to
+      the mean of the identified gains. Expected, not an error.
+  (2) slow BACK-AND-FORTH sweeps in BOTH directions at a couple of speeds ->
+      identify Coulomb (sign(v)) and viscous (v) friction. A joint that never
+      moves (vmax < friction_min_vel) keeps zero friction.
+Keep motion SLOW: the inertia term M(q)*a is not modeled (a=0). Recording stops
+on ENTER (default) or after 'duration' seconds.
 
 Usage (UR7e example):
 
     ros2 run crisp_controllers_robot_demos calibrate_external_effort \\
         --ros-args -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, \\
-        elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \\
-        -p output_file:=external_effort_calibration.yaml
+        elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]"
 
 Parameters:
     joint_names (string[])   REQUIRED — actuated arm joints, in order.
     stop_on_key (bool)       stop when ENTER is pressed (default True).
     duration (double)        max recording seconds / safety cap (default 120).
     sample_rate (double)     sampling rate in Hz (default 5).
-    vel_threshold (double)   max |joint velocity| (rad/s) to count as settled;
-                             samples are only recorded below it (default 0.02).
+    friction_min_vel (double) max |velocity| (rad/s) below which a joint is treated
+                             as static and its friction stays 0 (default 0.05).
     min_span (double)        gravity span (Nm) below which a joint's gain is
-                             unidentifiable, so it uses the nominal gain and only
-                             its offset is fit (default 1).
+                             unidentifiable, so it uses the nominal gain (default 1).
     output_file (str)        YAML path. Default is config/ur/
                              external_effort_calibration.yaml, which
                              external_effort.launch.py auto-loads.
@@ -78,7 +73,7 @@ DEFAULT_CALIBRATION = os.path.join(
 
 
 class CalibrateExternalEffort(Node):
-    """Record contact-free (q, I) samples and fit effort_gain/offset per joint."""
+    """Record contact-free (q, v, I) and fit gain/friction/offset per joint."""
 
     def __init__(self):
         super().__init__("calibrate_external_effort")
@@ -95,10 +90,10 @@ class CalibrateExternalEffort(Node):
         self._duration = self.declare_parameter("duration", 120.0).value
         self._sample_rate = self.declare_parameter("sample_rate", 5.0).value
         self._min_span = self.declare_parameter("min_span", 1.0).value
-        # Only record when the arm is settled: the gain fit assumes each sample is
-        # a STATIC holding point (current = gravity/k + stiction). Sampling while
-        # moving injects acceleration + kinetic friction and corrupts the gain.
-        self._vel_threshold = self.declare_parameter("vel_threshold", 0.02).value
+        # Friction (coulomb/viscous) is only identified for a joint that actually
+        # MOVES: a joint whose max |velocity| across the recording stays below this
+        # is treated as static and its friction is left at 0 (rad/s).
+        self._friction_min_vel = self.declare_parameter("friction_min_vel", 0.05).value
         self._output_file = self.declare_parameter(
             "output_file", DEFAULT_CALIBRATION
         ).value
@@ -112,8 +107,10 @@ class CalibrateExternalEffort(Node):
         self._model_joint_names: list[str] | None = None
         self._estimator: ExternalEffortEstimator | None = None
         self._qs: list[np.ndarray] = []
+        self._vs: list[np.ndarray] = []
         self._taus: list[np.ndarray] = []
         self._gravity: list[np.ndarray] = []
+        self._model: list[np.ndarray] = []
         self._started = False
         self._stop_requested = False
         self.done = False
@@ -133,11 +130,12 @@ class CalibrateExternalEffort(Node):
 
         self.get_logger().info(
             f"Waiting for /robot_description and '{joint_state_topic}'...\n"
-            "  MOVE then PAUSE: samples are only taken when the arm is settled, so\n"
-            "  dwell a second or two at each pose. Nothing touching the arm.\n"
-            "  Cover diverse poses across each joint's gravity range:\n"
-            "    shoulder_lift: raise/lower the arm | elbow: fold/extend\n"
-            "    wrist_1: pitch up/down | wrist_2: ROLL so its axis tilts\n"
+            "  Nothing touching the arm. Do BOTH, per joint:\n"
+            "   (1) STATIC holds across each joint's gravity range (fixes the gain)\n"
+            "       shoulder_lift: raise/lower | elbow: fold/extend | wrist_1: pitch\n"
+            "       | wrist_2: ROLL so its axis tilts\n"
+            "   (2) slow BACK-AND-FORTH sweeps in BOTH directions, a couple of\n"
+            "       speeds (fixes Coulomb+viscous friction).\n"
             "  (shoulder_pan / wrist_3 can't be gravity-excited — that's fine.)\n"
             + (
                 "  Press ENTER to stop and fit.\n"
@@ -198,35 +196,32 @@ class CalibrateExternalEffort(Node):
 
         q = np.array([msg.position[i] for i in self._msg_index])
         tau = np.array([msg.effort[i] for i in self._msg_index])
-        if np.isnan(tau).any() or np.isnan(q).any():
+        if len(msg.velocity) > max(self._msg_index):
+            v = np.array([msg.velocity[i] for i in self._msg_index])
+        else:
+            v = np.zeros_like(q)
+        if np.isnan(tau).any() or np.isnan(q).any() or np.isnan(v).any():
             bad = [
                 self._model_joint_names[j]
                 for j in range(len(tau))
-                if np.isnan(tau[j]) or np.isnan(q[j])
+                if np.isnan(tau[j]) or np.isnan(q[j]) or np.isnan(v[j])
             ]
             self.get_logger().warning(
-                f"Skipping sample: NaN effort/position on {bad}. This arm joint "
-                "is not reporting a valid value — calibration cannot proceed "
+                f"Skipping sample: NaN effort/position/velocity on {bad}. This arm "
+                "joint is not reporting a valid value — calibration cannot proceed "
                 "until the driver publishes it.",
                 throttle_duration_sec=5.0,
             )
             return  # a NaN on any recorded joint would poison the fit
 
-        # Only record STATIC holding points: if any recorded joint is moving, the
-        # current is dominated by acceleration + kinetic friction, not gravity, and
-        # corrupts the gain fit. Move the arm, then PAUSE and let it settle.
-        if len(msg.velocity) > max(self._msg_index):
-            vel = np.array([msg.velocity[i] for i in self._msg_index])
-            if np.max(np.abs(vel)) > self._vel_threshold:
-                self.get_logger().info(
-                    "  ...moving, waiting for the arm to settle before sampling.",
-                    throttle_duration_sec=2.0,
-                )
-                return
-
+        # Record BOTH static and moving samples: static ones fix the gain (gravity
+        # variation), moving ones fix Coulomb+viscous friction (velocity). The
+        # model term rnea(q, v, 0) accounts for gravity + Coriolis at each sample.
         self._qs.append(q)
+        self._vs.append(v)
         self._taus.append(tau)
         self._gravity.append(self._estimator.gravity_effort(q))
+        self._model.append(self._estimator.model_effort(q, v))
 
         # Live diversity feedback: current gravity span per joint.
         n = len(self._qs)
@@ -253,53 +248,79 @@ class CalibrateExternalEffort(Node):
 
     def _fit_and_save(self) -> None:
         qs = np.stack(self._qs)
+        vs = np.stack(self._vs)
         currents = np.stack(self._taus)  # /joint_states effort is motor current (A)
         gravity = np.stack(self._gravity)
+        model = np.stack(self._model)  # rnea(q, v, 0) = gravity + Coriolis
         spans = np.ptp(gravity, axis=0)
-
+        vmax = np.max(np.abs(vs), axis=0)
         n = len(self._model_joint_names)
-        # /joint_states effort is CURRENT, so we fit a per-joint current->torque
-        # gain k (Nm/A) plus a constant offset such that, contact-free,
-        #     k*I - g(q) - offset == 0.
-        # Per joint that means g ~ k*I + c (least squares), with offset = -c.
-        # g(q) keeps coefficient 1 — the unit conversion lives on the current.
+        ones = np.ones(len(qs))
+
+        # Contact-free: k*I - model - (coulomb*sign(v) + viscous*v) - offset == 0.
+        # Per joint fit  model ~ k*I - coulomb*sign(v) - viscous*v - offset.
+        # The gain k needs gravity variation (span >= min_span); friction needs
+        # motion (vmax >= friction_min_vel). Fit whatever each joint's data supports.
         effort_gain = np.ones(n)
+        coulomb = np.zeros(n)
+        viscous = np.zeros(n)
         offset = np.zeros(n)
-        identifiable = spans >= self._min_span
-        for j in range(n):
-            if identifiable[j]:
-                A = np.stack([currents[:, j], np.ones(len(qs))], axis=1)
-                (k, c), *_ = np.linalg.lstsq(A, gravity[:, j], rcond=None)
-                effort_gain[j], offset[j] = k, -c
+        has_gain = spans >= self._min_span
+        has_fric = vmax >= self._friction_min_vel
 
-        # Near-vertical joints (shoulder_pan, wrist_3) are barely gravity-loaded,
-        # so k is unidentifiable. Fall back to the mean of the identified gains
-        # (keeps every joint's output in ~Nm) and fit only the offset.
-        nominal = float(np.mean(effort_gain[identifiable])) if identifiable.any() else 1.0
         for j in range(n):
-            if not identifiable[j]:
-                effort_gain[j] = nominal
-                offset[j] = float(np.mean(effort_gain[j] * currents[:, j] - gravity[:, j]))
-                self.get_logger().warning(
-                    f"'{self._model_joint_names[j]}': gravity span {spans[j]:.2f} Nm "
-                    f"< {self._min_span} — gain unidentifiable, using nominal "
-                    f"{nominal:.2f} Nm/A (expected for pan/wrist_3, or move this "
-                    "joint through more gravity)."
+            if not has_gain[j]:
+                continue  # gain-blind (pan/wrist_3): nominal gain applied below
+            if has_fric[j]:
+                A = np.stack(
+                    [currents[:, j], -np.sign(vs[:, j]), -vs[:, j], -ones], axis=1
                 )
+                (k, cf, vf, off), *_ = np.linalg.lstsq(A, model[:, j], rcond=None)
+                effort_gain[j], coulomb[j], viscous[j], offset[j] = k, cf, vf, off
+            else:
+                A = np.stack([currents[:, j], -ones], axis=1)
+                (k, off), *_ = np.linalg.lstsq(A, model[:, j], rcond=None)
+                effort_gain[j], offset[j] = k, off
 
-        residual = effort_gain * currents - gravity - offset
+        # Gain-blind joints use the mean identified gain, then fit friction/offset
+        # (or just offset) from the residual k*I - model.
+        nominal = float(np.mean(effort_gain[has_gain])) if has_gain.any() else 1.0
+        for j in range(n):
+            if has_gain[j]:
+                continue
+            effort_gain[j] = nominal
+            resid = effort_gain[j] * currents[:, j] - model[:, j]
+            if has_fric[j]:
+                A = np.stack([np.sign(vs[:, j]), vs[:, j], ones], axis=1)
+                (cf, vf, off), *_ = np.linalg.lstsq(A, resid, rcond=None)
+                coulomb[j], viscous[j], offset[j] = cf, vf, off
+            else:
+                offset[j] = float(np.mean(resid))
+            self.get_logger().warning(
+                f"'{self._model_joint_names[j]}': gravity span {spans[j]:.2f} Nm "
+                f"< {self._min_span} — gain unidentifiable, using nominal "
+                f"{nominal:.2f} Nm/A (expected for pan/wrist_3)."
+            )
+
+        residual = (
+            effort_gain * currents - model - (coulomb * np.sign(vs) + viscous * vs) - offset
+        )
         rms = np.sqrt((residual**2).mean(axis=0))
         for j, name in enumerate(self._model_joint_names):
             self.get_logger().info(
-                f"{name}: gain={effort_gain[j]:+.3f}Nm/A offset={offset[j]:+.3f}Nm "
-                f"span={spans[j]:.2f}Nm residual_rms={rms[j]:.3f}Nm"
+                f"{name}: gain={effort_gain[j]:+.3f}Nm/A coulomb={coulomb[j]:+.3f}Nm "
+                f"viscous={viscous[j]:+.3f} offset={offset[j]:+.3f}Nm "
+                f"span={spans[j]:.1f}Nm vmax={vmax[j]:.2f} rms={rms[j]:.3f}Nm"
             )
 
         data = {
             "joint_names": list(self._model_joint_names),
             "effort_gain": [round(float(v), 6) for v in effort_gain],
             "offset": [round(float(v), 6) for v in offset],
+            "coulomb": [round(float(v), 6) for v in coulomb],
+            "viscous": [round(float(v), 6) for v in viscous],
             "gravity_span": [round(float(v), 4) for v in spans],
+            "velocity_max": [round(float(v), 4) for v in vmax],
             "residual_rms": [round(float(v), 6) for v in rms],
             "n_samples": int(len(qs)),
         }
