@@ -48,6 +48,13 @@ Parameters:
                              is dropped (default 0.2).
     min_span (double)        gravity span (Nm) below which a joint's gain is
                              unidentifiable, so it uses the nominal gain (default 1).
+    fixed_gain (double[])    pin the current->torque gain (Nm/A) instead of fitting
+                             it: one value for all joints, or one per joint (0 = fit
+                             that joint). Only the offset is fit for pinned joints.
+                             The gain is a physical constant, so pinning it removes
+                             the run-to-run variance of re-estimating it.
+    nominal_gain (double)    gain for joints whose gain is unidentifiable
+                             (0 = mean of the identified/fixed gains, the default).
     output_file (str)        YAML path. Default is config/ur/
                              external_effort_calibration.yaml, which
                              external_effort.launch.py auto-loads.
@@ -104,6 +111,14 @@ class CalibrateExternalEffort(Node):
         # this): where the joint accelerates, the unmodeled inertia M*a swamps the
         # ~1 Nm friction (worst on the big joints) and corrupts the fit (rad/s^2).
         self._accel_max = self.declare_parameter("accel_max", 0.2).value
+        # Fixed current->torque gain(s), Nm/A. The gain is a physical constant
+        # (torque constant x gear ratio), so once known it is more robust to pin it
+        # than to re-estimate it from every recording. One value = all joints, or
+        # one per joint (0 = fit that joint normally). Only the offset is then fit.
+        self._fixed_gain = list(self.declare_parameter("fixed_gain", [0.0]).value)
+        # Gain used for joints whose gain is unidentifiable; 0 = mean of the
+        # identified/fixed gains (the previous behaviour).
+        self._nominal_gain = float(self.declare_parameter("nominal_gain", 0.0).value)
         self._output_file = self.declare_parameter(
             "output_file", DEFAULT_CALIBRATION
         ).value
@@ -309,18 +324,43 @@ class CalibrateExternalEffort(Node):
                     "(e.g. elbow folded, half, extended), not just sweep through them."
                 )
 
+        # Resolve any fixed gains: one value = every joint, or one per joint (0 =
+        # fit that joint from data as usual).
+        fixed = np.full(n, np.nan)
+        fg = np.asarray(self._fixed_gain, dtype=float)
+        if fg.size == 1 and fg[0] > 0:
+            fixed[:] = fg[0]
+        elif fg.size == n:
+            fixed[fg > 0] = fg[fg > 0]
+        if np.isfinite(fixed).any():
+            self.get_logger().info(
+                "Using fixed effort_gain for "
+                f"{[self._model_joint_names[j] for j in range(n) if np.isfinite(fixed[j])]}"
+                " — only their offset is fit."
+            )
+
         # Stage 1: gain + offset from static samples (gravity == k*I - offset).
+        # A fixed gain skips the gain fit and keeps only the offset, which removes
+        # the run-to-run variance of estimating a physical constant from noisy data.
         for j in range(n):
-            if not has_gain[j]:
-                continue
-            A = np.stack([currents[stat, j], -ones[stat]], axis=1)
-            (k, off), *_ = np.linalg.lstsq(A, gravity[stat, j], rcond=None)
-            effort_gain[j], offset[j] = k, off
+            if np.isfinite(fixed[j]):
+                effort_gain[j] = fixed[j]
+                offset[j] = float(
+                    np.mean(effort_gain[j] * currents[stat, j] - gravity[stat, j])
+                )
+            elif has_gain[j]:
+                A = np.stack([currents[stat, j], -ones[stat]], axis=1)
+                (k, off), *_ = np.linalg.lstsq(A, gravity[stat, j], rcond=None)
+                effort_gain[j], offset[j] = k, off
 
         # Gain-blind joints (pan, wrist_3): nominal gain, offset from static residual.
-        nominal = float(np.mean(effort_gain[has_gain])) if has_gain.any() else 1.0
+        resolved = has_gain | np.isfinite(fixed)
+        if self._nominal_gain > 0:
+            nominal = self._nominal_gain
+        else:
+            nominal = float(np.mean(effort_gain[resolved])) if resolved.any() else 1.0
         for j in range(n):
-            if has_gain[j]:
+            if resolved[j]:
                 continue
             effort_gain[j] = nominal
             offset[j] = float(np.mean(effort_gain[j] * currents[stat, j] - gravity[stat, j]))

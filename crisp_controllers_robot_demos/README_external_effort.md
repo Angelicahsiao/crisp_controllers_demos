@@ -128,6 +128,20 @@ The default `output_file` is `config/ur/external_effort_calibration.yaml`, which
 the launch **auto-loads** — so calibrating with the default and then launching
 needs no `calibration_file:` argument.
 
+**Pinning the gain (recommended once you know it).** The gain is a physical
+constant (torque constant × gear ratio), so re-estimating it every run only adds
+variance — especially on joints with a small gravity span, where the fit is
+ill-conditioned. Once a well-conditioned joint has given you a trustworthy value
+(e.g. `shoulder_lift` with a ~50 Nm span → ~11.1 Nm/A), pin it and fit only the
+offsets:
+
+```bash
+# all joints at 11.1 Nm/A:
+-p fixed_gain:="[11.1]"
+# or per joint (0 = fit that one from data):
+-p fixed_gain:="[11.1, 11.1, 11.1, 0.0, 0.0, 0.0]"
+```
+
 **2. Launch the node (auto-loads the calibration):**
 
 ```bash
@@ -203,6 +217,8 @@ prefix in, the un-prefixed names are used as a fallback.
 | `duration` | `120.0` | Max recording seconds / safety cap when `stop_on_key`. |
 | `sample_rate` | `5.0` | Sampling rate in Hz. |
 | `min_span` | `1.0` | Gravity span (Nm) below which a joint's gain is unidentifiable → nominal gain. |
+| `fixed_gain` | `[0.0]` | Pin the current→torque gain (Nm/A) instead of fitting it: one value for all joints, or one per joint (`0` = fit that joint). Only the offset is fit for pinned joints. |
+| `nominal_gain` | `0.0` | Gain for unidentifiable joints (`0` = mean of the identified/fixed gains). |
 | `friction_min_vel` | `0.05` | Max \|velocity\| (rad/s) below which a joint is static → zero friction. |
 | `accel_max` | `0.2` | Max \|acceleration\| (rad/s²) for a sample to be used in the friction fit (drops inertia-contaminated samples). |
 | `output_file` | `config/ur/external_effort_calibration.yaml` | Where to write the fit (launch auto-loads this default). |
