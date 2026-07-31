@@ -270,10 +270,18 @@ class CalibrateExternalEffort(Node):
         # only to select near-constant-velocity samples for the friction fit, so the
         # unmodeled inertia M*a does not corrupt it.
         accel = np.gradient(vs, times, axis=0) if len(times) > 2 else np.zeros_like(vs)
-        spans = np.ptp(gravity, axis=0)
         vmax = np.max(np.abs(vs), axis=0)
         n = len(self._model_joint_names)
         ones = np.ones(len(qs))
+
+        # The gain is fit on STATIC samples only, so identifiability must be judged
+        # on the gravity span WITHIN that subset: a joint can sweep through a wide
+        # gravity range while every *held* pose sits at nearly the same gravity,
+        # which silently gives a degenerate (garbage) gain fit.
+        arm_static = np.max(np.abs(vs), axis=1) < self._friction_min_vel
+        stat = arm_static if arm_static.sum() >= 3 else np.ones(len(qs), dtype=bool)
+        spans = np.ptp(gravity[stat], axis=0)  # span over the samples used for the gain
+        spans_all = np.ptp(gravity, axis=0)  # span over everything (reported only)
 
         # TWO-STAGE fit so the gain is not confounded by motion. On moving samples
         # current and velocity are collinear (and inertia M*a leaks in), so a joint
@@ -287,15 +295,19 @@ class CalibrateExternalEffort(Node):
         viscous = np.zeros(n)
         offset = np.zeros(n)
         has_gain = spans >= self._min_span
-        arm_static = np.max(np.abs(vs), axis=1) < self._friction_min_vel
         if arm_static.sum() < 10:
             self.get_logger().warning(
                 f"Only {int(arm_static.sum())} settled samples — also hold the arm "
                 "STILL at several poses (not only sweeps) so the gain fits cleanly."
             )
-        # Degenerate guard: if there are essentially no static samples, fall back to
-        # all samples for the gain (degraded) rather than failing.
-        stat = arm_static if arm_static.sum() >= 3 else np.ones(len(qs), dtype=bool)
+        for j in range(n):
+            if spans_all[j] >= self._min_span > spans[j]:
+                self.get_logger().warning(
+                    f"'{self._model_joint_names[j]}': gravity span is {spans_all[j]:.1f} "
+                    f"Nm while moving but only {spans[j]:.1f} Nm across the HELD poses "
+                    "— hold this joint still at several DIFFERENT gravity loads "
+                    "(e.g. elbow folded, half, extended), not just sweep through them."
+                )
 
         # Stage 1: gain + offset from static samples (gravity == k*I - offset).
         for j in range(n):
@@ -345,11 +357,19 @@ class CalibrateExternalEffort(Node):
             effort_gain * currents - model - (coulomb * np.sign(vs) + viscous * vs) - offset
         )
         rms = np.sqrt((residual**2).mean(axis=0))
+        # Static RMS is the at-rest noise floor (what you see standing still) and is
+        # the honest measure of gain/offset quality; the overall RMS mixes in motion.
+        rms_static = np.sqrt((residual[stat] ** 2).mean(axis=0))
+        self.get_logger().info(
+            f"{int(arm_static.sum())} static / {len(qs) - int(arm_static.sum())} "
+            f"moving samples of {len(qs)}."
+        )
         for j, name in enumerate(self._model_joint_names):
             self.get_logger().info(
                 f"{name}: gain={effort_gain[j]:+.3f}Nm/A coulomb={coulomb[j]:+.3f}Nm "
                 f"viscous={viscous[j]:+.3f} offset={offset[j]:+.3f}Nm "
-                f"span={spans[j]:.1f}Nm vmax={vmax[j]:.2f} rms={rms[j]:.3f}Nm"
+                f"span_held={spans[j]:.1f}Nm (all {spans_all[j]:.1f}) "
+                f"vmax={vmax[j]:.2f} rms={rms[j]:.3f} rms_static={rms_static[j]:.3f}Nm"
             )
 
         data = {
@@ -359,9 +379,12 @@ class CalibrateExternalEffort(Node):
             "coulomb": [round(float(v), 6) for v in coulomb],
             "viscous": [round(float(v), 6) for v in viscous],
             "gravity_span": [round(float(v), 4) for v in spans],
+            "gravity_span_all": [round(float(v), 4) for v in spans_all],
             "velocity_max": [round(float(v), 4) for v in vmax],
             "residual_rms": [round(float(v), 6) for v in rms],
+            "residual_rms_static": [round(float(v), 6) for v in rms_static],
             "n_samples": int(len(qs)),
+            "n_static": int(arm_static.sum()),
         }
         with open(self._output_file, "w") as f:
             yaml.safe_dump(data, f, sort_keys=False)
