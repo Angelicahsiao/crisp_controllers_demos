@@ -21,11 +21,14 @@ Record BOTH, per joint, because they identify different terms:
     - shoulder_pan and wrist_3 rotate about near-vertical axes: gravity barely
       loads them, so their k is unidentifiable (span < min_span) and falls back to
       the mean of the identified gains. Expected, not an error.
-  (2) slow BACK-AND-FORTH sweeps in BOTH directions at a couple of speeds ->
-      identify Coulomb (sign(v)) and viscous (v) friction. A joint that never
-      moves (vmax < friction_min_vel) keeps zero friction.
-Keep motion SLOW: the inertia term M(q)*a is not modeled (a=0). Recording stops
-on ENTER (default) or after 'duration' seconds.
+  (2) slow STEADY sweeps at a CONSTANT speed, both directions, at 2-3 speeds ->
+      identify Coulomb (sign(v)) and viscous (v) friction. Only near-constant-
+      velocity samples (|accel| <= accel_max) are used for the friction fit, so
+      the unmodeled inertia M(q)*a does not corrupt it; a joint without enough
+      such samples keeps zero friction (friction ID needs both signs and >=2
+      distinct speeds, or Coulomb and viscous cannot be separated).
+Keep motion SLOW: the inertia term M(q)*a is not modeled at run time. Recording
+stops on ENTER (default) or after 'duration' seconds.
 
 Usage (UR7e example):
 
@@ -40,6 +43,9 @@ Parameters:
     sample_rate (double)     sampling rate in Hz (default 5).
     friction_min_vel (double) max |velocity| (rad/s) below which a joint is treated
                              as static and its friction stays 0 (default 0.05).
+    accel_max (double)       max |acceleration| (rad/s^2) for a sample to be used in
+                             the friction fit; larger = inertia-contaminated, so it
+                             is dropped (default 0.2).
     min_span (double)        gravity span (Nm) below which a joint's gain is
                              unidentifiable, so it uses the nominal gain (default 1).
     output_file (str)        YAML path. Default is config/ur/
@@ -94,6 +100,10 @@ class CalibrateExternalEffort(Node):
         # MOVES: a joint whose max |velocity| across the recording stays below this
         # is treated as static and its friction is left at 0 (rad/s).
         self._friction_min_vel = self.declare_parameter("friction_min_vel", 0.05).value
+        # Friction is only fit on NEAR-CONSTANT-VELOCITY samples (|accel| below
+        # this): where the joint accelerates, the unmodeled inertia M*a swamps the
+        # ~1 Nm friction (worst on the big joints) and corrupts the fit (rad/s^2).
+        self._accel_max = self.declare_parameter("accel_max", 0.2).value
         self._output_file = self.declare_parameter(
             "output_file", DEFAULT_CALIBRATION
         ).value
@@ -111,6 +121,7 @@ class CalibrateExternalEffort(Node):
         self._taus: list[np.ndarray] = []
         self._gravity: list[np.ndarray] = []
         self._model: list[np.ndarray] = []
+        self._times: list[float] = []
         self._started = False
         self._stop_requested = False
         self.done = False
@@ -134,8 +145,9 @@ class CalibrateExternalEffort(Node):
             "   (1) STATIC holds across each joint's gravity range (fixes the gain)\n"
             "       shoulder_lift: raise/lower | elbow: fold/extend | wrist_1: pitch\n"
             "       | wrist_2: ROLL so its axis tilts\n"
-            "   (2) slow BACK-AND-FORTH sweeps in BOTH directions, a couple of\n"
-            "       speeds (fixes Coulomb+viscous friction).\n"
+            "   (2) slow STEADY sweeps at a CONSTANT speed, both directions, at\n"
+            "       2-3 speeds (fixes Coulomb+viscous friction). Hold each speed —\n"
+            "       accelerating samples are dropped (inertia would corrupt them).\n"
             "  (shoulder_pan / wrist_3 can't be gravity-excited — that's fine.)\n"
             + (
                 "  Press ENTER to stop and fit.\n"
@@ -222,6 +234,7 @@ class CalibrateExternalEffort(Node):
         self._taus.append(tau)
         self._gravity.append(self._estimator.gravity_effort(q))
         self._model.append(self._estimator.model_effort(q, v))
+        self._times.append(self.get_clock().now().nanoseconds / 1e9)
 
         # Live diversity feedback: current gravity span per joint.
         n = len(self._qs)
@@ -252,6 +265,11 @@ class CalibrateExternalEffort(Node):
         currents = np.stack(self._taus)  # /joint_states effort is motor current (A)
         gravity = np.stack(self._gravity)
         model = np.stack(self._model)  # rnea(q, v, 0) = gravity + Coriolis
+        times = np.asarray(self._times)
+        # Per-joint acceleration (central difference over the recorded times) — used
+        # only to select near-constant-velocity samples for the friction fit, so the
+        # unmodeled inertia M*a does not corrupt it.
+        accel = np.gradient(vs, times, axis=0) if len(times) > 2 else np.zeros_like(vs)
         spans = np.ptp(gravity, axis=0)
         vmax = np.max(np.abs(vs), axis=0)
         n = len(self._model_joint_names)
@@ -300,14 +318,26 @@ class CalibrateExternalEffort(Node):
                 f"{nominal:.2f} Nm/A (expected for pan/wrist_3)."
             )
 
-        # Stage 2: Coulomb + viscous from each joint's MOVING samples, gain fixed.
-        # residual = k*I - model - offset ~ coulomb*sign(v) + viscous*v.
+        # Stage 2: Coulomb + viscous from each joint's MOVING, near-CONSTANT-VELOCITY
+        # samples (|accel| <= accel_max), gain and offset fixed. Excluding
+        # accelerating samples keeps the unmodeled inertia M*a out of the residual,
+        # which is then just friction: k*I - model - offset ~ coulomb*sign(v)+viscous*v.
+        # If a joint has too few clean samples, its friction stays 0 (safe — better
+        # than an inertia-corrupted fit that would over-subtract during motion).
         for j in range(n):
-            moving = np.abs(vs[:, j]) >= self._friction_min_vel
-            if moving.sum() < 10:
+            usable = (np.abs(vs[:, j]) >= self._friction_min_vel) & (
+                np.abs(accel[:, j]) <= self._accel_max
+            )
+            if usable.sum() < 10:
+                if vmax[j] >= self._friction_min_vel:
+                    self.get_logger().warning(
+                        f"'{self._model_joint_names[j]}': only {int(usable.sum())} "
+                        "constant-velocity samples — friction left at 0. Move it in "
+                        "slow, STEADY sweeps (hold a constant speed) at 2-3 speeds."
+                    )
                 continue
-            r = effort_gain[j] * currents[moving, j] - model[moving, j] - offset[j]
-            A = np.stack([np.sign(vs[moving, j]), vs[moving, j]], axis=1)
+            r = effort_gain[j] * currents[usable, j] - model[usable, j] - offset[j]
+            A = np.stack([np.sign(vs[usable, j]), vs[usable, j]], axis=1)
             (cf, vf), *_ = np.linalg.lstsq(A, r, rcond=None)
             coulomb[j], viscous[j] = cf, vf
 

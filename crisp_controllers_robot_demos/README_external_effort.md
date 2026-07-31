@@ -106,10 +106,13 @@ different terms:
 | `wrist_2` | **roll** the wrist so its axis tilts between vertical and horizontal |
 | `shoulder_pan`, `wrist_3` | rotate about near-vertical axes — gravity barely loads them in **any** pose, so their gain is **unidentifiable**; the script uses the mean of the identified gains and fits only their offset. Expected, not an error. |
 
-- **Slow back-and-forth sweeps** in **both directions** at a couple of speeds →
-  identify **Coulomb** (`sign(v)`) and **viscous** (`v`) friction. Keep it slow —
-  the inertia term `M·a` is not modeled. A joint that never moves
-  (`vmax < friction_min_vel`, default 0.05 rad/s) keeps zero friction.
+- **Slow STEADY sweeps at a constant speed**, both directions, at **2–3 speeds**
+  → identify **Coulomb** (`sign(v)`) and **viscous** (`v`) friction. *Hold* each
+  speed: only near-constant-velocity samples (`|accel| ≤ accel_max`, default
+  0.2 rad/s²) are used, because on an accelerating joint the unmodeled inertia
+  `M·a` swamps the ~1 Nm friction (worst on the big joints) and corrupts the fit.
+  A joint without enough clean samples (or moved at only one speed) keeps **zero
+  friction** — safer than an inertia-corrupted fit that would over-subtract.
 
 While recording, the node prints a live **gravity span** per joint
 (`shoulder_lift:4.2OK  elbow:0.3..`). A span below `min_span` (default 1 Nm) means
@@ -168,6 +171,7 @@ prefix in, the un-prefixed names are used as a fallback.
 | `sample_rate` | `5.0` | Sampling rate in Hz. |
 | `min_span` | `1.0` | Gravity span (Nm) below which a joint's gain is unidentifiable → nominal gain. |
 | `friction_min_vel` | `0.05` | Max \|velocity\| (rad/s) below which a joint is static → zero friction. |
+| `accel_max` | `0.2` | Max \|acceleration\| (rad/s²) for a sample to be used in the friction fit (drops inertia-contaminated samples). |
 | `output_file` | `config/ur/external_effort_calibration.yaml` | Where to write the fit (launch auto-loads this default). |
 | `joint_state_topic` | `joint_states` | Source topic. |
 
