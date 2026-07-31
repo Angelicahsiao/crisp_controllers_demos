@@ -110,7 +110,9 @@ different terms:
 | `wrist_2` | **roll** the wrist so its axis tilts between vertical and horizontal |
 | `shoulder_pan`, `wrist_3` | rotate about near-vertical axes — gravity barely loads them in **any** pose, so their gain is **unidentifiable**; the script uses the mean of the identified gains and fits only their offset. Expected, not an error. |
 
-- **Slow STEADY sweeps at a constant speed**, both directions, at **2–3 speeds**
+- **Slow STEADY sweeps at a constant speed**, both directions, at **2–3 speeds**.
+  Hand-guiding is usually too jerky for this (typically only a handful of usable
+  samples survive the filter) — use `velocity_sweep` (below) to drive it instead.
   → identify **Coulomb** (`sign(v)`) and **viscous** (`v`) friction. *Hold* each
   speed: only near-constant-velocity samples (`|accel| ≤ accel_max`, default
   0.2 rad/s²) are used, because on an accelerating joint the unmodeled inertia
@@ -161,6 +163,46 @@ no calibration it warns and runs uncalibrated (`effort_gain = 1`, meaningless).
 
 **Re-calibrate whenever the end-effector mass changes** (different gripper,
 added camera, tool payload).
+
+## Driving constant-velocity sweeps (`velocity_sweep`)
+
+Friction can only be identified from steady-speed motion, which is hard to produce
+by hand. `velocity_sweep` claims the hardware's **velocity** command interface via
+`forward_velocity_controller` and oscillates each joint at a set of constant
+speeds, so ~72–92 % of every segment is clean constant-velocity data.
+
+```bash
+# 1. ALWAYS dry-run first: prints the plan and validates ranges, moves nothing.
+ros2 run crisp_controllers_robot_demos velocity_sweep
+
+# 2. Record while it drives (two terminals):
+ros2 run crisp_controllers_robot_demos calibrate_external_effort \
+  --ros-args -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \
+  -p fixed_gain:="[11.1]" -p duration:=600
+ros2 run crisp_controllers_robot_demos velocity_sweep --ros-args -p dry_run:=false
+```
+
+⚠️ **The arm moves under power.** Clear the workspace, keep the e-stop in reach,
+and start with a single joint and a small amplitude:
+`-p sweep_joints:="[wrist_1_joint]" -p amplitude:=0.3`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `dry_run` | **`true`** | Print the plan and exit; nothing is switched or commanded. |
+| `sweep_joints` | all | Which joints to sweep. |
+| `speeds` | `[0.1, 0.2, 0.35]` | Constant speeds to hold (rad/s). |
+| `amplitude` | `0.5` | Travel each way from the start pose (rad). |
+| `max_speed` | `0.5` | Hard clamp on any commanded speed (rad/s). |
+| `ramp_time` | `0.4` | Ramp between 0 and target speed (s), so motion isn't jerked. |
+| `q_min` / `q_max` | start ± 1.2·amplitude | Per-joint position bounds. |
+| `deactivate` | impedance + gravity comp + JTC | Controllers stood down while sweeping. |
+
+Safety behaviour: speeds are clamped, each segment has a timeout and position
+bounds, and on exit — including Ctrl-C or any exception — zeros are published and
+the original controllers are restored. Note the velocity controller **cannot run
+at the same time** as the effort controllers (one command interface per joint), and
+it is not spawned for `use_fake_hardware:=true` (the MuJoCo hardware only exposes
+an effort interface).
 
 ## Momentum observer (`method:=momentum`) — for motion
 

@@ -17,6 +17,9 @@
   <depend>tf2_ros</depend>
   <!-- external_effort.launch.py visualize:=true -->
   <exec_depend>rqt_plot</exec_depend>
+  <!-- velocity_sweep: switch_controller service + velocity command controller -->
+  <depend>controller_manager_msgs</depend>
+  <exec_depend>velocity_controllers</exec_depend>
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
