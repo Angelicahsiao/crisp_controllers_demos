@@ -17,6 +17,12 @@ Parameters:
     offset (double[])        per-joint offset, Nm (default all 0).
     coulomb (double[])       per-joint Coulomb friction, Nm (default all 0).
     viscous (double[])       per-joint viscous friction, Nm/(rad/s) (default 0).
+    use_coulomb (bool)       apply the Coulomb term (default True).
+    use_viscous (bool)       apply the viscous term (default False — often poorly
+                             identified).
+    method (str)             "gravity" (quasi-static) or "momentum" (generalized
+                             momentum observer; handles inertia during motion).
+    observer_gain (double)   momentum-observer bandwidth K_O, rad/s (default 20).
 
 Namespaced joint names: a node namespace prefix (e.g. "right") is prepended to
 each configured joint name when matching /joint_states, mirroring crisp_py.
@@ -117,6 +123,18 @@ class ExternalEffortNode(Node):
         self._coulomb = np.asarray(coulomb, dtype=float)
         self._viscous = np.asarray(viscous, dtype=float)
 
+        # Friction toggles (viscous is often poorly identified, so default off).
+        if not self.declare_parameter("use_coulomb", True).value:
+            self._coulomb = np.zeros(n)
+        if not self.declare_parameter("use_viscous", False).value:
+            self._viscous = np.zeros(n)
+
+        # Estimation method: "gravity" (quasi-static tau=gain*I-rnea(q,v,0)-...) or
+        # "momentum" (generalized momentum observer; handles inertia during motion).
+        self._method = self.declare_parameter("method", "gravity").value
+        self._observer_gain = float(self.declare_parameter("observer_gain", 20.0).value)
+        self._last_stamp: float | None = None
+
         if not calibration_file and np.allclose(self._effort_gain, 1.0):
             self.get_logger().warning(
                 "Running UNCALIBRATED (effort_gain = 1). /joint_states effort is "
@@ -159,23 +177,34 @@ class ExternalEffortNode(Node):
             return False
         from crisp_controllers_robot_demos.external_effort import ExternalEffortEstimator
 
-        prefixed = [self._prefix + n for n in self._joint_names]
         kwargs = dict(
             effort_gain=self._effort_gain,
             offset=self._offset,
             coulomb=self._coulomb,
             viscous=self._viscous,
         )
+        if self._method == "momentum":
+            from crisp_controllers_robot_demos.momentum_observer import MomentumObserver
+
+            def build(names):
+                return MomentumObserver(
+                    self._urdf, names, observer_gain=self._observer_gain, **kwargs
+                )
+        else:
+            def build(names):
+                return ExternalEffortEstimator(self._urdf, names, **kwargs)
+
+        prefixed = [self._prefix + n for n in self._joint_names]
         try:
-            self._estimator = ExternalEffortEstimator(self._urdf, prefixed, **kwargs)
+            self._estimator = build(prefixed)
         except ValueError:
             # namespace prefix may already be baked into the URDF joint names
-            self._estimator = ExternalEffortEstimator(
-                self._urdf, list(self._joint_names), **kwargs
-            )
+            self._estimator = build(list(self._joint_names))
             prefixed = list(self._joint_names)
         self._model_joint_names = prefixed
-        self.get_logger().info("external_effort_node: Pinocchio model built.")
+        self.get_logger().info(
+            f"external_effort_node: Pinocchio model built ('{self._method}' method)."
+        )
         return True
 
     def _on_joint_state(self, msg: JointState) -> None:
@@ -209,7 +238,18 @@ class ExternalEffortNode(Node):
             v = np.array([msg.velocity[i] for i in self._msg_index], dtype=float)
         else:
             v = np.zeros_like(q)
-        tau_ext = self._estimator.external_effort(q, v, tau)
+
+        if self._method == "momentum":
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            dt = 0.0 if self._last_stamp is None else stamp - self._last_stamp
+            # Reset on a gap or clock jump so the integral does not blow up.
+            if dt < 0.0 or dt > 0.5:
+                self._estimator.reset()
+                dt = 0.0
+            self._last_stamp = stamp
+            tau_ext = self._estimator.update(q, v, tau, dt)
+        else:
+            tau_ext = self._estimator.external_effort(q, v, tau)
 
         out = Float32MultiArray()
         out.data = [float(v) for v in tau_ext]

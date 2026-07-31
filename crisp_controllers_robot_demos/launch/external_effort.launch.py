@@ -65,6 +65,14 @@ def _launch_setup(context, *args, **kwargs):
                     "output_topic": output_topic,
                     "joint_state_topic": joint_state_topic,
                     "calibration_file": calibration_file,
+                    "method": LaunchConfiguration("method").perform(context),
+                    "observer_gain": float(
+                        LaunchConfiguration("observer_gain").perform(context)
+                    ),
+                    "use_coulomb": LaunchConfiguration("use_coulomb").perform(context)
+                    in ("true", "1", "yes"),
+                    "use_viscous": LaunchConfiguration("use_viscous").perform(context)
+                    in ("true", "1", "yes"),
                 }
             ],
         )
@@ -111,6 +119,26 @@ def generate_launch_description():
                 "visualize",
                 default_value="false",
                 description="Open rqt_plot with one live trace per joint's external effort.",
+            ),
+            DeclareLaunchArgument(
+                "method",
+                default_value="gravity",
+                description="'gravity' (quasi-static) or 'momentum' (generalized "
+                "momentum observer; handles inertia during motion).",
+            ),
+            DeclareLaunchArgument(
+                "observer_gain",
+                default_value="20.0",
+                description="Momentum-observer bandwidth K_O (rad/s); higher = "
+                "faster response, more noise.",
+            ),
+            DeclareLaunchArgument(
+                "use_coulomb", default_value="true",
+                description="Apply the calibrated Coulomb friction term.",
+            ),
+            DeclareLaunchArgument(
+                "use_viscous", default_value="false",
+                description="Apply the calibrated viscous friction term (often noisy).",
             ),
             OpaqueFunction(function=_launch_setup),
         ]

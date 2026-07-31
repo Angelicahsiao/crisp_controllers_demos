@@ -43,7 +43,8 @@ any pose; pushing on a link deflects the joints upstream of the contact.
 
 | File | Role |
 |---|---|
-| `crisp_controllers_robot_demos/external_effort.py` | `ExternalEffortEstimator`: Pinocchio model, gravity term, calibration fit. |
+| `crisp_controllers_robot_demos/external_effort.py` | `ExternalEffortEstimator`: Pinocchio model, gravity + Coriolis + friction, calibration fit. |
+| `crisp_controllers_robot_demos/momentum_observer.py` | `MomentumObserver`: generalized momentum observer (`method:=momentum`) — inertia-aware, no acceleration. |
 | `crisp_controllers_robot_demos/external_effort_node.py` | ROS 2 node: subscribes `/robot_description` + `/joint_states`, publishes `tau_ext`. |
 | `crisp_controllers_robot_demos/calibrate_external_effort.py` | Records contact-free samples, fits per-joint `effort_gain` (current→torque) + `offset`, writes a calibration YAML. |
 | `crisp_controllers_robot_demos/identify_payload.py` | Measures the tool payload mass + COM from the wrist F/T sensor (feeds the URDF payload so `g(q)` is accurate). |
@@ -144,6 +145,35 @@ no calibration it warns and runs uncalibrated (`effort_gain = 1`, meaningless).
 **Re-calibrate whenever the end-effector mass changes** (different gripper,
 added camera, tool payload).
 
+## Momentum observer (`method:=momentum`) — for motion
+
+The default `gravity` method is quasi-static: it drops the inertia term `M·a`, so
+it over-reads during fast motion, and identifying joint friction on high-inertia
+joints from current is hard (inertia swamps it). The **generalized momentum
+observer** (De Luca & Mattone) fixes both — it estimates external torque from `q`,
+`v`, and the applied torque **without acceleration**, handling inertia and
+Coriolis exactly:
+
+```
+r = K_O · ( p - ∫[ tau + C(q,v)ᵀv - g(q) + r ] dt - p(0) ),   p = M(q)·v
+```
+
+`r` is a first-order low-pass estimate of `tau_ext` with per-joint bandwidth
+`observer_gain` (`K_O`). `tau = effort_gain·I - offset - friction` reuses the same
+calibration.
+
+```bash
+ros2 launch crisp_controllers_robot_demos external_effort.launch.py \
+  method:=momentum observer_gain:=20.0 visualize:=true
+```
+
+- **`observer_gain` (K_O, rad/s)** is the tuning knob: higher = faster/more
+  sensitive but noisier; lower = smoother but laggier. Start ~20 and adjust.
+- Uses the **same calibration YAML** (gain, offset, Coulomb; viscous stays off by
+  default via `use_viscous:=false`). Friction is still the main residual — the
+  observer just no longer needs friction to cover for inertia.
+- The observer is stateful; it self-resets on a `/joint_states` time gap.
+
 ## Parameters
 
 ### `external_effort_node`
@@ -156,6 +186,9 @@ added camera, tool payload).
 | `calibration_file` | `""` | YAML from the calibration script; empty = `effort_gain 1` (meaningless — calibrate). |
 | `effort_gain` / `offset` | `1.0` / `0.0` per joint | Manual current→torque gain (Nm/A) and offset (Nm); overridden by `calibration_file`. |
 | `coulomb` / `viscous` | `0.0` / `0.0` per joint | Manual Coulomb (Nm) and viscous (Nm/(rad/s)) friction; overridden by `calibration_file`. |
+| `use_coulomb` / `use_viscous` | `true` / `false` | Toggle applying each friction term (viscous off by default — often noisy). |
+| `method` | `gravity` | `gravity` (quasi-static) or `momentum` (momentum observer). |
+| `observer_gain` | `20.0` | Momentum-observer bandwidth `K_O` (rad/s), `method:=momentum` only. |
 
 A node namespace (e.g. `right`) is prepended to joint names (`right_...`) when
 matching `/joint_states`, mirroring crisp_py; if the URDF already bakes the
