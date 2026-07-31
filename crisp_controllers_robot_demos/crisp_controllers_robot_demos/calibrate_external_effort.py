@@ -73,7 +73,10 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
-from crisp_controllers_robot_demos.external_effort import ExternalEffortEstimator
+from crisp_controllers_robot_demos.external_effort import (
+    ExternalEffortEstimator,
+    smooth_sign,
+)
 
 # Default calibration path in the SOURCE tree (resolved from this file, which
 # --symlink-install points into the bind-mounted source), so the calibration
@@ -119,6 +122,10 @@ class CalibrateExternalEffort(Node):
         # Gain used for joints whose gain is unidentifiable; 0 = mean of the
         # identified/fixed gains (the previous behaviour).
         self._nominal_gain = float(self.declare_parameter("nominal_gain", 0.0).value)
+        # Viscous friction is off by default: tanh(v/eps) and v are near-collinear
+        # unless the sweeps span clearly different speeds, and the degenerate pair
+        # blows up (observed coulomb +16.4 with viscous -18.3 cancelling).
+        self._fit_viscous = bool(self.declare_parameter("fit_viscous", False).value)
         self._output_file = self.declare_parameter(
             "output_file", DEFAULT_CALIBRATION
         ).value
@@ -389,12 +396,35 @@ class CalibrateExternalEffort(Node):
                     )
                 continue
             r = effort_gain[j] * currents[usable, j] - model[usable, j] - offset[j]
-            A = np.stack([np.sign(vs[usable, j]), vs[usable, j]], axis=1)
-            (cf, vf), *_ = np.linalg.lstsq(A, r, rcond=None)
+            ss = smooth_sign(vs[usable, j], self._friction_min_vel)
+            if self._fit_viscous:
+                # tanh(v/eps) and v are near-collinear unless the sweeps cover
+                # clearly different speeds, which makes the pair blow up in equal
+                # and opposite directions (seen: coulomb +16.4 with viscous -18.3).
+                A = np.stack([ss, vs[usable, j]], axis=1)
+                (cf, vf), *_ = np.linalg.lstsq(A, r, rcond=None)
+            else:
+                # Coulomb only: single, well-conditioned parameter.
+                cf = float(np.linalg.lstsq(ss[:, None], r, rcond=None)[0][0])
+                vf = 0.0
+            # Sanity guard: a Coulomb magnitude far above the joint's own gravity
+            # scale is not friction, it is a degenerate fit. Drop it rather than
+            # publish an estimate that jumps by that much whenever the joint moves.
+            limit = max(2.0, 0.5 * float(spans_all[j]))
+            if abs(cf) > limit:
+                self.get_logger().warning(
+                    f"'{self._model_joint_names[j]}': friction fit gave coulomb="
+                    f"{cf:+.2f} Nm (limit {limit:.1f}) — implausible, leaving "
+                    "friction at 0. Record steadier sweeps at 2-3 distinct speeds."
+                )
+                continue
             coulomb[j], viscous[j] = cf, vf
 
         residual = (
-            effort_gain * currents - model - (coulomb * np.sign(vs) + viscous * vs) - offset
+            effort_gain * currents
+            - model
+            - (coulomb * smooth_sign(vs, self._friction_min_vel) + viscous * vs)
+            - offset
         )
         rms = np.sqrt((residual**2).mean(axis=0))
         # Static RMS is the at-rest noise floor (what you see standing still) and is

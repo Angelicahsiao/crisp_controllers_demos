@@ -133,6 +133,9 @@ class ExternalEffortNode(Node):
         # "momentum" (generalized momentum observer; handles inertia during motion).
         self._method = self.declare_parameter("method", "gravity").value
         self._observer_gain = float(self.declare_parameter("observer_gain", 20.0).value)
+        # Velocity scale over which Coulomb friction ramps up; must match the value
+        # used at calibration time (calibrate uses friction_min_vel, default 0.05).
+        self._friction_eps = float(self.declare_parameter("friction_eps", 0.05).value)
         self._last_stamp: float | None = None
 
         if not calibration_file and np.allclose(self._effort_gain, 1.0):
@@ -182,6 +185,7 @@ class ExternalEffortNode(Node):
             offset=self._offset,
             coulomb=self._coulomb,
             viscous=self._viscous,
+            friction_eps=self._friction_eps,
         )
         if self._method == "momentum":
             from crisp_controllers_robot_demos.momentum_observer import MomentumObserver

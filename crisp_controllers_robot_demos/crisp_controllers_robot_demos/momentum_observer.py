@@ -18,7 +18,7 @@ torque with per-joint bandwidth K_O (observer_gain). Inertia and Coriolis are
 handled exactly; the remaining error is model uncertainty — mainly joint friction,
 so `tau` is the friction-compensated applied torque
 
-    tau = effort_gain * I - offset - coulomb*sign(v) - viscous*v
+    tau = effort_gain * I - offset - coulomb*tanh(v/eps) - viscous*v
 
 (I = /joint_states current). This reuses ExternalEffortEstimator to build the
 reduced Pinocchio model and to hold the current->torque / friction calibration.
@@ -45,10 +45,11 @@ class MomentumObserver:
         coulomb: NDArray | None = None,
         viscous: NDArray | None = None,
         observer_gain: float | NDArray = 20.0,
+        friction_eps: float = 0.05,
     ):
         # Reuse the estimator for the reduced model, indices and calibration.
         self._est = ExternalEffortEstimator(
-            urdf, joint_names, effort_gain, offset, coulomb, viscous
+            urdf, joint_names, effort_gain, offset, coulomb, viscous, friction_eps
         )
         self.model = self._est.model
         self.data = self._est.data
@@ -97,11 +98,12 @@ class MomentumObserver:
         (first call / time gap) re-initialises the state and returns zeros.
         """
         p, cor, g = self._dynamics(q, v)
+        # Reuse the estimator's friction model so the regularized Coulomb term
+        # (tanh, zero at standstill) is shared by both estimation methods.
         tau = (
             self.effort_gain * np.asarray(currents)
             - self.offset
-            - self.coulomb * np.sign(v)
-            - self.viscous * np.asarray(v)
+            - self._est.friction_effort(v)
         )
         if not self._initialized or dt <= 0.0:
             self._p0 = p.copy()

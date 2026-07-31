@@ -21,8 +21,11 @@ tau_ext[Nm] = effort_gain * I  -  rnea(q, v, 0)  -  friction(v)  -  offset
   **plus** the Coriolis/centrifugal term `C(q,v)·v`, coefficient **1**. The
   inertia term `M(q)·a` is dropped (acceleration would need noisy differentiation)
   — keep motions slow. Only as accurate as the URDF masses (see the payload note).
-- `friction(v) = coulomb·sign(v) + viscous·v` — the 2-parameter Coulomb+viscous
-  joint-friction model. This is what velocity buys over the quasi-static model.
+- `friction(v) = coulomb·tanh(v/ε) + viscous·v` — the Coulomb+viscous joint
+  friction model. This is what velocity buys over the quasi-static model. The
+  Coulomb term uses a **regularized** sign (`tanh`, ε = `friction_eps` = 0.05) so
+  it decays to zero at standstill; plain `sign(v)` returns ±1 on mere velocity
+  noise and would inject the full ±`coulomb` Nm into a stationary robot.
 - `offset` (Nm) — per-joint constant (current bias / static holding term).
 
 > **Calibration is required, not optional.** With `effort_gain = 1` you would
@@ -219,6 +222,7 @@ prefix in, the un-prefixed names are used as a fallback.
 | `min_span` | `1.0` | Gravity span (Nm) below which a joint's gain is unidentifiable → nominal gain. |
 | `fixed_gain` | `[0.0]` | Pin the current→torque gain (Nm/A) instead of fitting it: one value for all joints, or one per joint (`0` = fit that joint). Only the offset is fit for pinned joints. |
 | `nominal_gain` | `0.0` | Gain for unidentifiable joints (`0` = mean of the identified/fixed gains). |
+| `fit_viscous` | `false` | Also fit the viscous term. Off by default: `tanh(v/ε)` and `v` are near-collinear unless the sweeps cover clearly different speeds, and the degenerate pair blows up in equal/opposite directions. |
 | `friction_min_vel` | `0.05` | Max \|velocity\| (rad/s) below which a joint is static → zero friction. |
 | `accel_max` | `0.2` | Max \|acceleration\| (rad/s²) for a sample to be used in the friction fit (drops inertia-contaminated samples). |
 | `output_file` | `config/ur/external_effort_calibration.yaml` | Where to write the fit (launch auto-loads this default). |

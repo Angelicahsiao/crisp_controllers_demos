@@ -15,9 +15,11 @@ subtract the model torque and joint friction, so the residual is the external
   The inertia term M(q)*a is dropped (a would need noisy differentiation); keep
   motions slow so it stays negligible. See the momentum-observer approach for a
   formulation that avoids acceleration entirely.
-- friction(v) = coulomb * sign(v) + viscous * v: the 2-parameter Coulomb+viscous
-  joint-friction model, identified from a *moving* contact-free recording. This
-  is what velocity buys us over the quasi-static model.
+- friction(v) = coulomb * tanh(v/eps) + viscous * v: the Coulomb+viscous joint
+  friction model, identified from a *moving* contact-free recording. This is what
+  velocity buys us over the quasi-static model. The Coulomb term uses a REGULARIZED
+  sign (tanh) so it decays to zero at standstill; plain sign(v) would inject the
+  full +-coulomb Nm on velocity noise while the robot is stationary.
 - offset (Nm): per-joint constant (current bias / static holding term).
 
 CALIBRATION IS REQUIRED (see fit_calibration / calibrate_external_effort): with
@@ -36,6 +38,21 @@ import numpy as np
 import pinocchio as pin
 from numpy.typing import NDArray
 
+#: Velocity scale (rad/s) over which Coulomb friction ramps up from zero.
+DEFAULT_FRICTION_EPS = 0.05
+
+
+def smooth_sign(v: NDArray, eps: float = DEFAULT_FRICTION_EPS) -> NDArray:
+    """Regularized sign: tanh(v/eps), i.e. sign(v) smoothed around zero.
+
+    Plain sign(v) is discontinuous: at |v| = 1e-3 (sensor noise at standstill) it
+    already commands the FULL Coulomb magnitude, injecting a +-coulomb Nm jump into
+    the estimate of a robot that is standing still. tanh(v/eps) goes smoothly to 0
+    as v -> 0 and saturates to +-1 once |v| >> eps, which is the standard
+    regularization for Coulomb friction in this kind of model.
+    """
+    return np.tanh(np.asarray(v, dtype=float) / eps)
+
 
 class ExternalEffortEstimator:
     """External joint torque from measured current and a Pinocchio dynamics model."""
@@ -48,6 +65,7 @@ class ExternalEffortEstimator:
         offset: NDArray | None = None,
         coulomb: NDArray | None = None,
         viscous: NDArray | None = None,
+        friction_eps: float = DEFAULT_FRICTION_EPS,
     ):
         """Build the estimator.
 
@@ -90,6 +108,7 @@ class ExternalEffortEstimator:
         self.offset = np.zeros(n) if offset is None else np.asarray(offset, dtype=float)
         self.coulomb = np.zeros(n) if coulomb is None else np.asarray(coulomb, dtype=float)
         self.viscous = np.zeros(n) if viscous is None else np.asarray(viscous, dtype=float)
+        self.friction_eps = float(friction_eps)
 
     def gravity_effort(self, q: NDArray) -> NDArray:
         """Model gravity torque g(q) in the configured joint order (v = a = 0)."""
@@ -109,9 +128,13 @@ class ExternalEffortEstimator:
         return tau[self._v_index]
 
     def friction_effort(self, v: NDArray) -> NDArray:
-        """Coulomb + viscous joint friction: coulomb*sign(v) + viscous*v (Nm)."""
+        """Joint friction: coulomb*tanh(v/eps) + viscous*v (Nm).
+
+        The Coulomb term uses the regularized sign so it vanishes at standstill
+        instead of jumping to +-coulomb on velocity noise.
+        """
         v = np.asarray(v)
-        return self.coulomb * np.sign(v) + self.viscous * v
+        return self.coulomb * smooth_sign(v, self.friction_eps) + self.viscous * v
 
     def external_effort(self, q: NDArray, v: NDArray, currents: NDArray) -> NDArray:
         """tau_ext = gain*I - rnea(q,v,0) - friction(v) - offset (I = measured current)."""
@@ -150,7 +173,8 @@ class ExternalEffortEstimator:
         off = np.zeros(n)
         ones = np.ones(len(qs))
         for j in range(n):
-            A = np.stack([currents[:, j], -np.sign(vs[:, j]), -vs[:, j], -ones], axis=1)
+            ss = smooth_sign(vs[:, j], self.friction_eps)
+            A = np.stack([currents[:, j], -ss, -vs[:, j], -ones], axis=1)
             (k[j], coul[j], visc[j], off[j]), *_ = np.linalg.lstsq(
                 A, model[:, j], rcond=None
             )
