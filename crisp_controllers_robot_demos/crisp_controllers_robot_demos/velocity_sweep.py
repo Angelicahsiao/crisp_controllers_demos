@@ -49,6 +49,7 @@ import time
 
 import rclpy
 from controller_manager_msgs.srv import ListControllers, SwitchController
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -73,26 +74,49 @@ DEFAULT_DEACTIVATE = [
 class VelocitySweep(Node):
     """Oscillate joints at constant velocity so friction can be identified."""
 
+    def _declare_number(self, name: str, default: float) -> float:
+        """Declare a float parameter that also accepts an integer on the CLI."""
+        return float(
+            self.declare_parameter(
+                name, default, descriptor=ParameterDescriptor(dynamic_typing=True)
+            ).value
+        )
+
+    def _declare_number_array(self, name: str, default: list[float]) -> list[float]:
+        """Same, for a float array (`-p speeds:="[1]"` parses as INTEGER_ARRAY)."""
+        return [
+            float(v)
+            for v in self.declare_parameter(
+                name, default, descriptor=ParameterDescriptor(dynamic_typing=True)
+            ).value
+        ]
+
     def __init__(self):
         super().__init__("velocity_sweep")
 
         self._joints = list(self.declare_parameter("joint_names", DEFAULT_JOINTS).value)
         sweep = [j for j in self.declare_parameter("sweep_joints", [""]).value if j]
         self._sweep_joints = sweep or list(self._joints)
-        self._speeds = list(self.declare_parameter("speeds", [0.1, 0.2, 0.35]).value)
-        self._amplitude = float(self.declare_parameter("amplitude", 0.5).value)
-        self._ramp_time = float(self.declare_parameter("ramp_time", 0.4).value)
-        self._max_speed = float(self.declare_parameter("max_speed", 0.5).value)
+        self._speeds = self._declare_number_array("speeds", [0.1, 0.2, 0.35])
+        self._amplitude = self._declare_number("amplitude", 0.5)
+        self._ramp_time = self._declare_number("ramp_time", 0.4)
+        self._max_speed = self._declare_number("max_speed", 0.5)
         self._dry_run = bool(self.declare_parameter("dry_run", True).value)
-        self._rate = float(self.declare_parameter("command_rate", 100.0).value)
+        self._rate = self._declare_number("command_rate", 100.0)
+        # Hold still at the end of every segment. The calibration fits the gain and
+        # offset from STATIC samples only, so without these pauses a sweep produces
+        # almost no usable gain data (observed: 55 static vs 547 moving). Dwelling
+        # at each segment end also puts those static samples at DIFFERENT gravity
+        # loads, which is exactly what makes the gain identifiable.
+        self._dwell = self._declare_number("dwell", 2.5)
         self._controller = self.declare_parameter(
             "controller", "forward_velocity_controller"
         ).value
         self._deactivate = [
             c for c in self.declare_parameter("deactivate", DEFAULT_DEACTIVATE).value if c
         ]
-        self._q_min = list(self.declare_parameter("q_min", [0.0]).value)
-        self._q_max = list(self.declare_parameter("q_max", [0.0]).value)
+        self._q_min = self._declare_number_array("q_min", [0.0])
+        self._q_max = self._declare_number_array("q_max", [0.0])
 
         unknown = [j for j in self._sweep_joints if j not in self._joints]
         if unknown:
@@ -243,6 +267,16 @@ class VelocitySweep(Node):
             self._publish(joint, speed * i / steps)
             time.sleep(period)
         self._publish(None, 0.0)
+
+        # Hold still so the calibration collects STATIC samples here — this pose is
+        # at a different gravity load than the other segment ends, which is what
+        # makes the gain identifiable. Keep publishing zeros so the controller does
+        # not time out, and keep spinning so /joint_states is still serviced.
+        dwell_end = time.time() + self._dwell
+        while rclpy.ok() and not self._abort and time.time() < dwell_end:
+            rclpy.spin_once(self, timeout_sec=0.0)
+            self._publish(None, 0.0)
+            time.sleep(period)
         return not self._abort
 
     def _sweep_joint(self, joint: str) -> bool:
@@ -286,9 +320,18 @@ class VelocitySweep(Node):
                 )
         else:
             lines.append("    (no /joint_states yet — cannot validate ranges)")
-        per_joint = sum(3 * (2 * self._amplitude / max(s, 1e-3)) for s in self._speeds)
+        per_joint = sum(
+            3 * (2 * self._amplitude / max(s, 1e-3) + self._dwell) for s in self._speeds
+        )
+        total = per_joint * len(self._sweep_joints)
+        n_dwell = 3 * len(self._speeds) * len(self._sweep_joints)
         lines.append(
-            f"  estimated duration ~{per_joint * len(self._sweep_joints) / 60.0:.1f} min"
+            f"  dwell      : {self._dwell}s held still after each segment "
+            f"({n_dwell} pauses -> static samples for the gain fit)"
+        )
+        lines.append(
+            f"  estimated duration ~{total / 60.0:.1f} min "
+            f"— set the calibration's duration ABOVE this (e.g. -p duration:={int(total * 1.5)}.0)"
         )
         return "\n".join(lines)
 

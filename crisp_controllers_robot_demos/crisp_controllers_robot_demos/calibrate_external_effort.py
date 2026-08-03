@@ -68,6 +68,7 @@ import threading
 import numpy as np
 import rclpy
 import yaml
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -91,6 +92,24 @@ DEFAULT_CALIBRATION = os.path.join(
 class CalibrateExternalEffort(Node):
     """Record contact-free (q, v, I) and fit gain/friction/offset per joint."""
 
+    def _declare_number(self, name: str, default: float) -> float:
+        """Declare a float parameter that also accepts an integer on the CLI.
+
+        With static typing, `-p duration:=900` fails with InvalidParameterType
+        because 900 parses as INTEGER while the declared default is DOUBLE.
+        """
+        value = self.declare_parameter(
+            name, default, descriptor=ParameterDescriptor(dynamic_typing=True)
+        ).value
+        return float(value)
+
+    def _declare_number_array(self, name: str, default: list[float]) -> list[float]:
+        """Same, for a float array (`-p fixed_gain:="[11]"` parses as INTEGER_ARRAY)."""
+        value = self.declare_parameter(
+            name, default, descriptor=ParameterDescriptor(dynamic_typing=True)
+        ).value
+        return [float(v) for v in value]
+
     def __init__(self):
         super().__init__("calibrate_external_effort")
 
@@ -103,25 +122,25 @@ class CalibrateExternalEffort(Node):
         if not self._joint_names:
             raise RuntimeError("calibrate_external_effort requires 'joint_names'.")
         self._stop_on_key = self.declare_parameter("stop_on_key", True).value
-        self._duration = self.declare_parameter("duration", 120.0).value
-        self._sample_rate = self.declare_parameter("sample_rate", 5.0).value
-        self._min_span = self.declare_parameter("min_span", 1.0).value
+        self._duration = self._declare_number("duration", 120.0)
+        self._sample_rate = self._declare_number("sample_rate", 5.0)
+        self._min_span = self._declare_number("min_span", 1.0)
         # Friction (coulomb/viscous) is only identified for a joint that actually
         # MOVES: a joint whose max |velocity| across the recording stays below this
         # is treated as static and its friction is left at 0 (rad/s).
-        self._friction_min_vel = self.declare_parameter("friction_min_vel", 0.05).value
+        self._friction_min_vel = self._declare_number("friction_min_vel", 0.05)
         # Friction is only fit on NEAR-CONSTANT-VELOCITY samples (|accel| below
         # this): where the joint accelerates, the unmodeled inertia M*a swamps the
         # ~1 Nm friction (worst on the big joints) and corrupts the fit (rad/s^2).
-        self._accel_max = self.declare_parameter("accel_max", 0.2).value
+        self._accel_max = self._declare_number("accel_max", 0.2)
         # Fixed current->torque gain(s), Nm/A. The gain is a physical constant
         # (torque constant x gear ratio), so once known it is more robust to pin it
         # than to re-estimate it from every recording. One value = all joints, or
         # one per joint (0 = fit that joint normally). Only the offset is then fit.
-        self._fixed_gain = list(self.declare_parameter("fixed_gain", [0.0]).value)
+        self._fixed_gain = self._declare_number_array("fixed_gain", [0.0])
         # Gain used for joints whose gain is unidentifiable; 0 = mean of the
         # identified/fixed gains (the previous behaviour).
-        self._nominal_gain = float(self.declare_parameter("nominal_gain", 0.0).value)
+        self._nominal_gain = self._declare_number("nominal_gain", 0.0)
         # Viscous friction is off by default: tanh(v/eps) and v are near-collinear
         # unless the sweeps span clearly different speeds, and the degenerate pair
         # blows up (observed coulomb +16.4 with viscous -18.3 cancelling).

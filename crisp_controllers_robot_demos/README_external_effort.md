@@ -171,16 +171,30 @@ by hand. `velocity_sweep` claims the hardware's **velocity** command interface v
 `forward_velocity_controller` and oscillates each joint at a set of constant
 speeds, so ~72–92 % of every segment is clean constant-velocity data.
 
+Each segment ends with a **dwell** (default 2.5 s held still), which is what
+supplies the *static* samples the gain/offset fit needs — and because each dwell
+sits at a different point in the joint's travel, those samples land at different
+gravity loads. Without it a sweep is ~9 % static (useless for the gain); with it
+~30 %.
+
 ```bash
-# 1. ALWAYS dry-run first: prints the plan and validates ranges, moves nothing.
+# 1. ALWAYS dry-run first: prints the plan, the dwell count, the estimated
+#    duration and the calibration `duration` to use. Moves nothing.
 ros2 run crisp_controllers_robot_demos velocity_sweep
 
-# 2. Record while it drives (two terminals):
+# 2. Record while it drives (two terminals). duration MUST exceed the sweep time
+#    printed by the dry run, or recording stops mid-sweep and the later joints
+#    are never excited.
 ros2 run crisp_controllers_robot_demos calibrate_external_effort \
   --ros-args -p joint_names:="[shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]" \
-  -p fixed_gain:="[11.1]" -p duration:=600
+  -p min_span:=5.0 -p fit_viscous:=true -p duration:=900.0
+
 ros2 run crisp_controllers_robot_demos velocity_sweep --ros-args -p dry_run:=false
 ```
+
+For the gravity-loaded joints a larger `amplitude` gives a wider gravity span and
+a better-conditioned gain, e.g.
+`-p sweep_joints:="[shoulder_lift_joint, elbow_joint]" -p amplitude:=0.8`.
 
 ⚠️ **The arm moves under power.** Clear the workspace, keep the e-stop in reach,
 and start with a single joint and a small amplitude:
@@ -192,6 +206,7 @@ and start with a single joint and a small amplitude:
 | `sweep_joints` | all | Which joints to sweep. |
 | `speeds` | `[0.1, 0.2, 0.35]` | Constant speeds to hold (rad/s). |
 | `amplitude` | `0.5` | Travel each way from the start pose (rad). |
+| `dwell` | `2.5` | Seconds held still after each segment — supplies the static samples for the gain/offset fit. |
 | `max_speed` | `0.5` | Hard clamp on any commanded speed (rad/s). |
 | `ramp_time` | `0.4` | Ramp between 0 and target speed (s), so motion isn't jerked. |
 | `q_min` / `q_max` | start ± (amplitude + stop dist + 0.05) | Per-joint position bounds. |
