@@ -48,7 +48,7 @@ import sys
 import time
 
 import rclpy
-from controller_manager_msgs.srv import SwitchController
+from controller_manager_msgs.srv import ListControllers, SwitchController
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
@@ -115,6 +115,15 @@ class VelocitySweep(Node):
         self._switch = self.create_client(
             SwitchController, "/controller_manager/switch_controller"
         )
+        self._list = self.create_client(
+            ListControllers, "/controller_manager/list_controllers"
+        )
+        # Controllers that were actually running when we started, so we restore
+        # exactly those. Blindly activating the whole candidate list is wrong: they
+        # are normally spawned inactive, and re-activating position and effort
+        # controllers together is rejected ("prepare command mode switch was
+        # rejected") because they claim conflicting interfaces on the same joints.
+        self._restore: list[str] = []
 
     def _on_joint_state(self, msg: JointState) -> None:
         self._positions = dict(zip(msg.name, msg.position))
@@ -131,10 +140,18 @@ class VelocitySweep(Node):
                 return True
         return False
 
+    def _stop_distance(self, speed: float) -> float:
+        """Travel while ramping |speed| -> 0 over ramp_time (triangular profile)."""
+        return abs(speed) * self._ramp_time / 2.0
+
     def _bounds(self, joint: str, q0: float) -> tuple[float, float]:
-        """Position bounds for a joint: explicit params, else start +- 1.2*amplitude."""
+        """Position bounds: start +- (amplitude + stopping distance + margin).
+
+        The margin must exceed the ramp-down travel, otherwise the joint coasts
+        past the bound while decelerating and trips the out-of-bounds guard.
+        """
         i = self._joints.index(joint)
-        margin = 1.2 * self._amplitude
+        margin = self._amplitude + self._stop_distance(self._max_speed) + 0.05
         lo, hi = q0 - margin, q0 + margin
         if len(self._q_min) == len(self._joints) and self._q_min[i] != 0.0:
             lo = max(lo, self._q_min[i])
@@ -150,7 +167,24 @@ class VelocitySweep(Node):
         cmd.data = data
         self._pub.publish(cmd)
 
+    def _active_controllers(self) -> list[str]:
+        """Names of the controllers currently in the 'active' state."""
+        if not self._list.wait_for_service(timeout_sec=5.0):
+            self.get_logger().warning(
+                "/controller_manager/list_controllers unavailable — cannot tell "
+                "which controllers are running."
+            )
+            return []
+        future = self._list.call_async(ListControllers.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
+        result = future.result()
+        if result is None:
+            return []
+        return [c.name for c in result.controller if c.state == "active"]
+
     def _switch_controllers(self, activate: list[str], deactivate: list[str]) -> bool:
+        if not activate and not deactivate:
+            return True
         if not self._switch.wait_for_service(timeout_sec=5.0):
             self.get_logger().error("/controller_manager/switch_controller unavailable.")
             return False
@@ -182,13 +216,18 @@ class VelocitySweep(Node):
                 self._publish(None, 0.0)
                 self.get_logger().error(f"lost /joint_states for '{joint}' — stopping.")
                 return False
-            if q < lo or q > hi:
+            # Out of bounds only matters if we are still driving further out; a
+            # segment that travels back toward the valid range is how we recover.
+            if (q > hi and idx_sign > 0) or (q < lo and idx_sign < 0):
                 self.get_logger().warning(
                     f"'{joint}' at {q:+.3f} rad left bounds [{lo:+.3f}, {hi:+.3f}] — "
                     "stopping this segment."
                 )
                 break
-            if (idx_sign > 0 and q >= target) or (idx_sign < 0 and q <= target):
+            # Start decelerating a stopping-distance early so the joint comes to
+            # rest AT the target instead of coasting past it.
+            stop_at = target - idx_sign * self._stop_distance(speed)
+            if (idx_sign > 0 and q >= stop_at) or (idx_sign < 0 and q <= stop_at):
                 break
             if time.time() > timeout:
                 self.get_logger().warning(f"'{joint}' segment timed out — stopping.")
@@ -267,7 +306,13 @@ class VelocitySweep(Node):
             self.get_logger().error("No /joint_states — refusing to move.")
             return 1
 
-        if not self._switch_controllers([self._controller], self._deactivate):
+        # Only stand down (and later restore) controllers that are actually running.
+        active = self._active_controllers()
+        self._restore = [c for c in self._deactivate if c in active]
+        self.get_logger().info(
+            f"active controllers: {active or '(none)'}; will restore {self._restore or '(none)'}"
+        )
+        if not self._switch_controllers([self._controller], self._restore):
             return 1
         self.get_logger().info(
             f"'{self._controller}' active. Sweeping — keep clear, e-stop ready."
@@ -286,8 +331,11 @@ class VelocitySweep(Node):
             for _ in range(5):
                 self._publish(None, 0.0)
                 time.sleep(0.01)
-            self._switch_controllers(self._deactivate, [self._controller])
-            self.get_logger().info("Commands zeroed, controllers restored.")
+            self._switch_controllers(self._restore, [self._controller])
+            self.get_logger().info(
+                "Commands zeroed, "
+                f"{self._controller} stopped, restored {self._restore or '(nothing was active)'}."
+            )
         return 0 if ok else 1
 
 

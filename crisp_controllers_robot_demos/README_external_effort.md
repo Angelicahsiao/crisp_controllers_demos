@@ -194,8 +194,8 @@ and start with a single joint and a small amplitude:
 | `amplitude` | `0.5` | Travel each way from the start pose (rad). |
 | `max_speed` | `0.5` | Hard clamp on any commanded speed (rad/s). |
 | `ramp_time` | `0.4` | Ramp between 0 and target speed (s), so motion isn't jerked. |
-| `q_min` / `q_max` | start ± 1.2·amplitude | Per-joint position bounds. |
-| `deactivate` | impedance + gravity comp + JTC | Controllers stood down while sweeping. |
+| `q_min` / `q_max` | start ± (amplitude + stop dist + 0.05) | Per-joint position bounds. |
+| `deactivate` | impedance + gravity comp + JTC | Candidates to stand down — only the ones **actually active** are switched off, and exactly those are restored. |
 
 Safety behaviour: speeds are clamped, each segment has a timeout and position
 bounds, and on exit — including Ctrl-C or any exception — zeros are published and
