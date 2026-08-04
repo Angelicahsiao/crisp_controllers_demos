@@ -137,8 +137,11 @@ def generate_launch_description():
                 description="Apply the calibrated Coulomb friction term.",
             ),
             DeclareLaunchArgument(
-                "use_viscous", default_value="false",
-                description="Apply the calibrated viscous friction term (often noisy).",
+                "use_viscous", default_value="true",
+                description="Apply the calibrated viscous friction term. On by "
+                "default: it is 0 unless the calibration explicitly fitted it, and "
+                "coulomb/viscous are fitted together — applying one alone "
+                "over-compensates.",
             ),
             OpaqueFunction(function=_launch_setup),
         ]

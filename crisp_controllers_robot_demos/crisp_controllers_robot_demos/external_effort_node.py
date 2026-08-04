@@ -123,10 +123,14 @@ class ExternalEffortNode(Node):
         self._coulomb = np.asarray(coulomb, dtype=float)
         self._viscous = np.asarray(viscous, dtype=float)
 
-        # Friction toggles (viscous is often poorly identified, so default off).
+        # Friction toggles. Both default ON so the calibration YAML is the source of
+        # truth: the calibrator only writes a non-zero viscous term when explicitly
+        # asked (fit_viscous), and coulomb/viscous are fitted TOGETHER — applying
+        # one without the other over-compensates, since each was fitted to explain
+        # only the part of the residual the other did not.
         if not self.declare_parameter("use_coulomb", True).value:
             self._coulomb = np.zeros(n)
-        if not self.declare_parameter("use_viscous", False).value:
+        if not self.declare_parameter("use_viscous", True).value:
             self._viscous = np.zeros(n)
 
         # Estimation method: "gravity" (quasi-static tau=gain*I-rnea(q,v,0)-...) or

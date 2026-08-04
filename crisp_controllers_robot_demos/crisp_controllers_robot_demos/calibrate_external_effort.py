@@ -145,6 +145,10 @@ class CalibrateExternalEffort(Node):
         # unless the sweeps span clearly different speeds, and the degenerate pair
         # blows up (observed coulomb +16.4 with viscous -18.3 cancelling).
         self._fit_viscous = bool(self.declare_parameter("fit_viscous", False).value)
+        # Absolute plausibility cap on the fitted Coulomb magnitude (Nm). Used
+        # together with a gravity-span heuristic; raise it for a joint that
+        # genuinely has high drive friction.
+        self._max_coulomb = self._declare_number("max_coulomb", 10.0)
         self._output_file = self.declare_parameter(
             "output_file", DEFAULT_CALIBRATION
         ).value
@@ -426,10 +430,12 @@ class CalibrateExternalEffort(Node):
                 # Coulomb only: single, well-conditioned parameter.
                 cf = float(np.linalg.lstsq(ss[:, None], r, rcond=None)[0][0])
                 vf = 0.0
-            # Sanity guard: a Coulomb magnitude far above the joint's own gravity
-            # scale is not friction, it is a degenerate fit. Drop it rather than
-            # publish an estimate that jumps by that much whenever the joint moves.
-            limit = max(2.0, 0.5 * float(spans_all[j]))
+            # Sanity guard against a degenerate fit. The gravity-span heuristic
+            # alone is unfair to the near-vertical joints (pan, wrist_3): their span
+            # is ~0 by geometry, so any friction at all was rejected regardless of
+            # how plausible it was. Take the larger of an absolute cap and the span
+            # heuristic.
+            limit = max(self._max_coulomb, 0.5 * float(spans_all[j]))
             if abs(cf) > limit:
                 self.get_logger().warning(
                     f"'{self._model_joint_names[j]}': friction fit gave coulomb="
