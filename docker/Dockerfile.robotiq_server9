@@ -10,7 +10,16 @@
 # Build with:  docker compose build launch_robotiq   (or launch_franka_gripper)
 # Requires the base tag to exist:
 #   docker tag <old_franka_overlay_id> crisp_controllers_demos:franka-overlay-server9
-FROM crisp_controllers_demos:franka-overlay-server9
+#
+# BASE_IMAGE is parameterized so this works on a machine that has no preserved
+# image: point it at a from-source build (docker/Dockerfile.franka_server9), e.g.
+#   docker build -f docker/Dockerfile.robotiq_server9 \
+#     --build-arg BASE_IMAGE=crisp_controllers_demos:franka-server9-rebuild .
+# Against such a build this layer is a harmless no-op -- Dockerfile.franka_server9
+# already builds robotiq_controllers, so the colcon call below just re-confirms it.
+# Compose passes FRANKA_IMAGE through as BASE_IMAGE.
+ARG BASE_IMAGE=crisp_controllers_demos:franka-overlay-server9
+FROM ${BASE_IMAGE}
 
 RUN bash -lc "source /opt/ros/humble/setup.bash \
     && source /home/ros/ros2_ws/install/setup.bash \
