@@ -99,6 +99,20 @@ WORKDIR ${WS}
 # is NOT in the monorepo and is resolved from apt via rosdep against the pinned
 # ROS snapshot. The old pin (82ae42f, plus a franka.repos file to fetch
 # franka_description 0.4.0) is no longer reachable upstream.
+#
+# PATCH (upstream bug in v1.0.0): franka_semantic_components/CMakeLists.txt omits
+# controller_interface from THIS_PACKAGE_INCLUDE_DEPENDS, so the library target
+# never gets its include dirs -- yet its headers #include
+# "controller_interface/helpers.hpp" and
+# "semantic_components/semantic_component_interface.hpp". It only find_package()s
+# controller_interface inside if(BUILD_TESTING), wiring it to the TEST targets
+# alone. package.xml does declare <depend>controller_interface</depend>, so this
+# is purely a CMake omission. It used to build by accident, via include dirs
+# re-exported transitively by hardware_interface/franka_hardware; newer
+# ros2_control releases tightened that export, exposing the latent bug as
+# "fatal error: controller_interface/helpers.hpp: No such file or directory".
+# The sed adds the missing dependency (the grep asserts the patch applied, so a
+# future pin whose CMakeLists changed shape fails loudly instead of silently).
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && git clone https://github.com/frankarobotics/franka_ros2.git src/franka_ros2 \
     && git -C src/franka_ros2 checkout ee7e659e7e8d3587a83bc3f4025bd7fd8003aebc \
@@ -106,6 +120,9 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && for r in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
          [ -f "$r" ] && vcs import src < "$r" --recursive --skip-existing || true; \
        done \
+    && sed -i 's/^    urdf)$/    urdf\n    controller_interface)/' \
+         src/franka_ros2/franka_semantic_components/CMakeLists.txt \
+    && grep -q 'controller_interface)' src/franka_ros2/franka_semantic_components/CMakeLists.txt \
     && apt-get update && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y --rosdistro ${ROS_DISTRO} \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
