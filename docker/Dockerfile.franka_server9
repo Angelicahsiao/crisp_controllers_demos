@@ -113,6 +113,19 @@ WORKDIR ${WS}
 # "fatal error: controller_interface/helpers.hpp: No such file or directory".
 # The sed adds the missing dependency (the grep asserts the patch applied, so a
 # future pin whose CMakeLists changed shape fails loudly instead of silently).
+#
+# PRUNE: the franka_ros2 metapackage <depend>s on franka_gazebo_bringup,
+# franka_ign_ros2_control, franka_fr3_moveit_config and franka_example_controllers,
+# so rosdep tries to install libignition-gazebo6-dev (Fortress, unavailable),
+# ros-gz, sdformat-urdf, moveit-* and joint-state-publisher-gui. This repo uses
+# none of them -- it needs only franka_description / franka_hardware /
+# franka_gripper / franka_msgs. Drop those packages (and the metapackage that
+# pulls them in) so rosdep never resolves their dependencies.
+#
+# franka_description is NOT in the monorepo; the deleted metapackage was the only
+# thing requesting it, and the apt package failed to install anyway. Clone it at
+# tag 0.4.0 (677ae3d) -- the exact version this repo's fr3 xacros target, and the
+# one the original franka.repos pinned.
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && git clone https://github.com/frankarobotics/franka_ros2.git src/franka_ros2 \
     && git -C src/franka_ros2 checkout ee7e659e7e8d3587a83bc3f4025bd7fd8003aebc \
@@ -123,6 +136,14 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
     && sed -i 's/^    urdf)$/    urdf\n    controller_interface)/' \
          src/franka_ros2/franka_semantic_components/CMakeLists.txt \
     && grep -q 'controller_interface)' src/franka_ros2/franka_semantic_components/CMakeLists.txt \
+    && rm -rf src/franka_ros2/franka_ros2 \
+              src/franka_ros2/franka_gazebo \
+              src/franka_ros2/franka_fr3_moveit_config \
+              src/franka_ros2/franka_example_controllers \
+              src/franka_ros2/franka_bringup \
+              src/franka_ros2/integration_launch_testing \
+    && git clone https://github.com/frankarobotics/franka_description.git src/franka_description \
+    && git -C src/franka_description checkout 677ae3d56de5c645ee92b637f388c690c069c550 \
     && apt-get update && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y --rosdistro ${ROS_DISTRO} \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
