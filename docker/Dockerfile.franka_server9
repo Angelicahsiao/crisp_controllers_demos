@@ -9,11 +9,22 @@
 #
 # Pins (extracted from the working image):
 #   libfranka            0.15.0  @155ddac  (FCI server 9; needs FR3 >= 5.7.2)
-#   franka_ros2                  @82ae42f  (brings franka_description 0.4.0 @677ae3d via its repos)
+#                                          BUILT FROM SOURCE; apt's is skipped
+#   franka_ros2          v1.0.0  @ee7e659  (monorepo: franka_hardware/gripper/msgs in-tree.
+#                                           gazebo/moveit/examples pruned -- see the franka step.
+#                                           Old pin @82ae42f is unreachable upstream.)
+#   franka_description   0.4.0   @677ae3d  (from source; not in the monorepo)
 #   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
-#   crisp_controllers    0.1.0   @db1d81a  (compiles against pinocchio 3.9.0, no MPL/deprecated shims)
-#   crisp_py                     @49b1665
-#   apt snapshot         humble/2026-03-01 (pinocchio 3.9.0, ros2_control 2.53.1)
+#   crisp_controllers    v1.1.0  @db1d81a  (needs MPL + deprecated-include shims;
+#                                           see the crisp step for why)
+#   crisp_py             v3.4.0  @49b1665
+#   apt snapshot         humble/2026-03-29 (pinocchio 3.9.0-1jammy.20260304; enforced by
+#                                           apt preferences + a build-time assertion)
+#   base image           osrf/ros:humble-desktop pinned by digest (see ARG BASE_IMAGE)
+#
+# NOT included (deliberately, unlike the preserved image): MuJoCo / crisp_mujoco_sim,
+# so use_fake_hardware:=true will NOT work; and MoveIt / Gazebo-Ignition.
+# Validated on real hardware: FR3 5.8.0 (FCI server 9) connects, controllers activate.
 #
 # Build (from the repo root):
 #   docker build -f docker/Dockerfile.franka_server9 \
@@ -29,47 +40,206 @@
 # "apt snapshot" notes below.
 
 ARG ROS_DISTRO=humble
-FROM osrf/ros:${ROS_DISTRO}-desktop AS base
+# Base image pinned BY DIGEST, not by the mutable :humble-desktop tag. That tag
+# was re-pointed upstream mid-effort, which silently invalidated the whole build
+# cache and swapped the base out from under a "reproducible" build. This digest
+# is the one a full, hardware-validated build was produced from -- do not bump it
+# without re-running the verification in the header above.
+# Override for an intentional base change:
+#   docker build --build-arg BASE_IMAGE=osrf/ros:humble-desktop@sha256:<new> ...
+# Note: this file is humble-specific regardless of ROS_DISTRO (the apt-pin
+# assertion below checks ros-humble-pinocchio by name).
+ARG BASE_IMAGE=osrf/ros:humble-desktop@sha256:2d29e5fae26dea36b4453c1ff4b0194ccc835e7cccf24081ca6b5039369df587
+FROM ${BASE_IMAGE} AS base
 
 # --- Pin apt to the server-9-era ROS snapshot (pinocchio 3.9.0) -------------
 # Repoint every ROS apt source (classic .list or deb822 .sources) at the dated
 # snapshot mirror. Allow downgrades so a newer pre-installed base package is
 # rolled back to the snapshot generation.
 ARG ROS_DISTRO=humble
-# ROS snapshots exist only on specific sync dates, not daily. 2026-02-19 matches
-# this image's package timestamps (pinocchio 3.9.0-...20260219, ros2_control
-# 2.53.1-...20260219). If this date 404s ("does not have a Release file"),
-# browse http://snapshots.ros.org/humble/ for a valid date in the pinocchio-3.9
-# window (~2026-02 .. 2026-05) and pass --build-arg ROS_SNAPSHOT=<date>.
-ARG ROS_SNAPSHOT=2026-02-19
+# ROS snapshots exist only on specific sync dates, not daily. Verified-good
+# dates that still ship pinocchio 3.9.0 (both 3.9.0-1jammy.20260304):
+#   2026-03-29 (default)   2026-05-14
+# The old 2026-02-19 was NEVER a published snapshot (no Release file -> apt 404);
+# it was mistakenly inferred from package build-timestamps, not a sync date.
+# To find/refresh valid dates (snapshots.ros.org has no browsable index; probe):
+#   for d in 2026-03-{01..31} 2026-04-{01..30} 2026-05-{01..31}; do \
+#     curl -s -o /dev/null -w "%{http_code} $d\n" \
+#       http://snapshots.ros.org/humble/$d/ubuntu/dists/jammy/Release; done | grep '^200'
+# then confirm pinocchio is still 3.9 on it and pass --build-arg ROS_SNAPSHOT=<date>.
+ARG ROS_SNAPSHOT=2026-03-29
+# snapshots.ros.org InRelease is signed by the "ROS Snapshot builder" key
+# (rosbuild@ros.org, fpr 4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA), which the
+# base-image keyring (packages.ros.org only) does NOT carry -> apt rejects the
+# repo as "not signed" (NO_PUBKEY AD19BAB3CBF125EA). The original Dockerfile
+# repointed the URL but never trusted this key. The base image ships no
+# Signed-By we can append to, so appending is not enough: below we fetch+verify
+# the key into its own keyring, then REPLACE the ROS apt source with a
+# self-contained snapshot source whose Signed-By pins that keyring -- the only
+# deterministic way to bind the snapshot key to the repo.
+# Preflight: fail fast with actionable guidance if the chosen snapshot has no
+# Release file, instead of the cryptic apt "does not have a Release file" error.
+#
+# The pin is enforced with apt PREFERENCES, not just by editing sources. The
+# base image enables packages.ros.org from somewhere outside
+# /etc/apt/sources.list and /etc/apt/sources.list.d (a grep over both finds
+# nothing, yet apt still fetches it), so removing source files is not
+# sufficient: both repos land at priority 500 and apt then picks the HIGHER
+# VERSION -- pinocchio 4.0.0 from the live repo instead of 3.9.0 from the
+# snapshot. preferences.d gives snapshots.ros.org priority 1001 (>1000, so
+# downgrades are allowed) and packages.ros.org priority -1 (never considered).
+# The assertion below then proves the pin actually took effect.
 RUN set -eux; \
-    find /etc/apt -name '*.list' -o -name '*.sources' | while read -r f; do \
-      sed -i -E "s#(https?://)packages.ros.org/ros2(-testing)?/ubuntu#http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu#g" "$f"; \
-    done; \
+    KEY=4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA; \
+    KEYRING=/usr/share/keyrings/ros-snapshot-archive-keyring.gpg; \
+    REL="http://snapshots.ros.org/${ROS_DISTRO}/${ROS_SNAPSHOT}/ubuntu/dists/jammy/Release"; \
+    if command -v curl >/dev/null 2>&1; then \
+      code="$(curl -s -o /dev/null -w '%{http_code}' "$REL" || echo 000)"; \
+      if [ "$code" != 200 ]; then \
+        echo "ERROR: ROS snapshot '${ROS_SNAPSHOT}' has no Release file (HTTP $code):" >&2; \
+        echo "       $REL" >&2; \
+        echo "       Pick a published date that still ships pinocchio 3.9 and pass" >&2; \
+        echo "       --build-arg ROS_SNAPSHOT=<date> (see the comment above this RUN)." >&2; \
+        exit 1; \
+      fi; \
+    fi; \
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${KEY}" \
+      | gpg --dearmor > "${KEYRING}"; \
+    gpg --show-keys --with-colons "${KEYRING}" | grep -qi "${KEY}"; \
+    for f in $(grep -rlE 'ros\.org' /etc/apt/sources.list.d 2>/dev/null); do rm -f "$f"; done; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i -E '/ros\.org/s|^|# disabled-by-snapshot-pin |' /etc/apt/sources.list; \
+    fi; \
+    printf 'Types: deb\nURIs: http://snapshots.ros.org/%s/%s/ubuntu\nSuites: jammy\nComponents: main\nSigned-By: %s\n' \
+      "${ROS_DISTRO}" "${ROS_SNAPSHOT}" "${KEYRING}" > /etc/apt/sources.list.d/ros2-snapshot.sources; \
+    printf 'Package: *\nPin: origin snapshots.ros.org\nPin-Priority: 1001\n\nPackage: *\nPin: origin packages.ros.org\nPin-Priority: -1\n' \
+      > /etc/apt/preferences.d/99-ros-snapshot-pin; \
     apt-get update; \
+    cand="$(apt-cache policy ros-humble-pinocchio | awk '/Candidate:/{print $2}')"; \
+    case "$cand" in \
+      3.9.*) echo "snapshot pin OK: ros-humble-pinocchio candidate ${cand}" ;; \
+      *) echo "ERROR: snapshot pin is NOT in effect." >&2; \
+         echo "       ros-humble-pinocchio candidate is '${cand}', expected 3.9.x from" >&2; \
+         echo "       snapshot ${ROS_SNAPSHOT}. Another apt source is shadowing the pin;" >&2; \
+         echo "       pinocchio 4.x breaks the pinned crisp_controllers. Sources seen:" >&2; \
+         grep -rE 'ros\.org' /etc/apt >&2 2>/dev/null || true; \
+         echo "       --- effective pin ---" >&2; \
+         apt-cache policy >&2; \
+         apt-cache policy ros-humble-pinocchio >&2; \
+         exit 1 ;; \
+    esac; \
     apt-get -y -o Dpkg::Options::=--force-confnew \
         --allow-downgrades dist-upgrade || true
 
-# Build tooling
+# Build tooling + runtime middleware.
+# The RMW implementations are NOT optional: docker-compose defaults the franka
+# services to RMW=cyclone (RMW_IMPLEMENTATION=rmw_cyclonedds_cpp) and provides a
+# launch_zenoh_router service, but osrf/ros:humble-desktop ships only FastDDS.
+# Without these every service dies with "failed to load shared library
+# 'librmw_cyclonedds_cpp.so'". Dockerfile.robots installs both; so do we.
+# python3 -> python symlink matches Dockerfile.robots (scripts that call `python`).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git python3-vcstool python3-colcon-common-extensions python3-rosdep \
+    ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    ros-${ROS_DISTRO}-rmw-zenoh-cpp \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
+ARG USERNAME=ros
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
 ENV WS=/home/ros/ros2_ws
-RUN useradd -m ros 2>/dev/null || true
+# Mirror Dockerfile.robots: a uid-1000 'ros' user with passwordless sudo.
+# The compose services run `cd ~/ros2_ws`, `sudo chmod a+rw /dev/ttyUSB*` and a
+# runtime `colcon build --packages-select crisp_controllers_robot_demos`, so the
+# runtime user must have $HOME=/home/ros, own the workspace, and hold sudo.
+# uid/gid 1000 matches the typical host user so the bind-mounted sources
+# (.:/home/ros/ros2_ws/src/crisp_controllers_demos) stay writable.
+RUN set -eux; \
+    if getent passwd ${USER_UID}; then userdel -r "$(getent passwd ${USER_UID} | cut -d: -f1)"; fi; \
+    if getent group ${USER_GID}; then groupdel "$(getent group ${USER_GID} | cut -d: -f1)"; fi; \
+    groupadd --gid ${USER_GID} ${USERNAME}; \
+    useradd -s /bin/bash --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends sudo; \
+    echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}; \
+    chmod 0440 /etc/sudoers.d/${USERNAME}; \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR ${WS}
 
-# --- franka: libfranka 0.15.0 + franka_ros2 @82ae42f + franka_description 0.4.0 ---
+# --- franka: libfranka 0.15.0 + franka_ros2 v1.0.0 (monorepo) ---
+# The tag's SHA is pinned for byte-level reproducibility. franka_ros2 v1.0.0
+# ships franka_hardware / franka_gripper / franka_msgs in-tree; franka_description
+# is NOT in the monorepo and is resolved from apt via rosdep against the pinned
+# ROS snapshot. The old pin (82ae42f, plus a franka.repos file to fetch
+# franka_description 0.4.0) is no longer reachable upstream.
+#
+# PATCH (upstream bug in v1.0.0): franka_semantic_components/CMakeLists.txt omits
+# controller_interface from THIS_PACKAGE_INCLUDE_DEPENDS, so the library target
+# never gets its include dirs -- yet its headers #include
+# "controller_interface/helpers.hpp" and
+# "semantic_components/semantic_component_interface.hpp". It only find_package()s
+# controller_interface inside if(BUILD_TESTING), wiring it to the TEST targets
+# alone. package.xml does declare <depend>controller_interface</depend>, so this
+# is purely a CMake omission. It used to build by accident, via include dirs
+# re-exported transitively by hardware_interface/franka_hardware; newer
+# ros2_control releases tightened that export, exposing the latent bug as
+# "fatal error: controller_interface/helpers.hpp: No such file or directory".
+# The sed adds the missing dependency (the grep asserts the patch applied, so a
+# future pin whose CMakeLists changed shape fails loudly instead of silently).
+#
+# PRUNE: the franka_ros2 metapackage <depend>s on franka_gazebo_bringup,
+# franka_ign_ros2_control, franka_fr3_moveit_config and franka_example_controllers,
+# so rosdep tries to install libignition-gazebo6-dev (Fortress, unavailable),
+# ros-gz, sdformat-urdf, moveit-* and joint-state-publisher-gui. This repo uses
+# none of them -- it needs only franka_description / franka_hardware /
+# franka_gripper / franka_msgs. Drop those packages (and the metapackage that
+# pulls them in) so rosdep never resolves their dependencies.
+#
+# franka_description is NOT in the monorepo; the deleted metapackage was the only
+# thing requesting it, and the apt package failed to install anyway. Clone it at
+# tag 0.4.0 (677ae3d) -- the exact version this repo's fr3 xacros target, and the
+# one the original franka.repos pinned.
+#
+# libfranka 0.15.0 IS BUILT FROM SOURCE here (tag 155ddac), not taken from apt.
+# This is the whole point of the image: apt's ros-humble-libfranka tracks the
+# pinned snapshot and ships a server-10 libfranka (0.20+), which CANNOT talk to
+# an FR3 5.8.0 / FCI server-9 robot. rosdep therefore runs with
+# --skip-keys libfranka so the apt package is never installed to shadow it.
+# Recipe gotchas carried over from Dockerfile.robots (all three are load-bearing):
+#   - libconsole-bridge-dev is required by libfranka's CMake but is absent from
+#     its package.xml, so rosdep never installs it;
+#   - the common/ submodule is required by add_subdirectory;
+#   - BUILD_TESTS/BUILD_EXAMPLES=OFF -- its tests need GTest::gmock imported
+#     targets unavailable here, and a robot image does not need them.
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && git clone https://github.com/frankarobotics/libfranka.git src/libfranka \
+    && git -C src/libfranka checkout 155ddac80565975b58f53eb2feeb85b07a6b9e13 \
+    && git -C src/libfranka submodule update --init --recursive \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libconsole-bridge-dev \
     && git clone https://github.com/frankarobotics/franka_ros2.git src/franka_ros2 \
-    && git -C src/franka_ros2 checkout 82ae42f697346c4c088c1dbca51768fbc8a123c9 \
-    # franka_ros2 @1.0.0-era uses franka.repos (older name); import whichever exists.
+    && git -C src/franka_ros2 checkout ee7e659e7e8d3587a83bc3f4025bd7fd8003aebc \
+    # Kept as a no-op guard: v1.0.0 ships no .repos file, but a future pin might.
     && for r in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
          [ -f "$r" ] && vcs import src < "$r" --recursive --skip-existing || true; \
        done \
+    && sed -i 's/^    urdf)$/    urdf\n    controller_interface)/' \
+         src/franka_ros2/franka_semantic_components/CMakeLists.txt \
+    && grep -q 'controller_interface)' src/franka_ros2/franka_semantic_components/CMakeLists.txt \
+    && rm -rf src/franka_ros2/franka_ros2 \
+              src/franka_ros2/franka_gazebo \
+              src/franka_ros2/franka_fr3_moveit_config \
+              src/franka_ros2/franka_example_controllers \
+              src/franka_ros2/franka_bringup \
+              src/franka_ros2/integration_launch_testing \
+    && git clone https://github.com/frankarobotics/franka_description.git src/franka_description \
+    && git -C src/franka_description checkout 677ae3d56de5c645ee92b637f388c690c069c550 \
     && apt-get update && rosdep update \
     && rosdep install --from-paths src --ignore-src -r -y --rosdistro ${ROS_DISTRO} \
+         --skip-keys libfranka \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+         -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Robotiq: ros2_robotiq_gripper @e78b482 (description + driver + controllers) ---
@@ -85,6 +255,27 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && rm -rf /var/lib/apt/lists/*
 
 # --- crisp: crisp_controllers @db1d81a + crisp_py @49b1665 + demos package ----
+# crisp_controllers @db1d81a is tag v1.1.0 (NOT 0.1.0 as an earlier version of
+# this header claimed). The preserved image runs exactly this commit against
+# pinocchio 3.9.0-1jammy.20260214, so v1.1.0 and pinocchio 3.9 are compatible.
+#
+# The snapshots still on the mirror ship a LATER REBUILD of the same upstream
+# version, 3.9.0-1jammy.20260304, whose installed header layout differs: the
+# classic <pinocchio/multibody/model.hpp> and the .hxx implementation headers
+# (e.g. algorithm/frames.hxx) are no longer at their historical paths, so the
+# build fails with "No such file or directory". No February snapshot exists on
+# snapshots.ros.org any more (probing 2026-02-01..2026-05-31 yields only
+# 2026-03-29 and 2026-05-14), so the 20260214 build cannot be pinned.
+#
+# Flags below are the recipe already proven in Dockerfile.robots for a
+# reorganized pinocchio:
+#   - BOOST_MPL_*: pinocchio 3's joint variant has 25 types, above Boost.MPL's
+#     default 20-type list limit ("boost::variant ... has no member 'storage_'").
+#   - -I .../pinocchio/deprecated: compat root holding the classic header paths.
+#     A non-existent -I directory is ignored by gcc, so this is safe if the
+#     layout differs; if the build still fails on missing pinocchio headers, the
+#     remaining option is bumping crisp_controllers to v2.3.1+ (which uses .hpp
+#     includes throughout) -- at the cost of differing from the preserved image.
 COPY . src/crisp_controllers_demos
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && git clone https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers \
@@ -94,8 +285,15 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && apt-get update && rosdep update \
     && rosdep install -q --from-paths src --ignore-src -y --rosdistro ${ROS_DISTRO} \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/${ROS_DISTRO}/include/pinocchio/deprecated" \
         --packages-select crisp_controllers crisp_py crisp_controllers_robot_demos \
     && rm -rf /var/lib/apt/lists/*
+
+# Everything above is built as root. Hand the workspace (and $HOME) to the
+# runtime user before switching, or the compose services' runtime
+# `colcon build` cannot write build/ install/ log/.
+RUN chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}
+USER ${USERNAME}
 
 ENTRYPOINT ["/ros_entrypoint.sh"]
 CMD ["bash"]

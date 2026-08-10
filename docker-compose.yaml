@@ -262,10 +262,14 @@ services:
     <<: *franka-overlay
     # Thin layer with robotiq_controllers (the Robotiq runs on its own
     # controller_manager inside franka.launch.py when use_gripper:=true).
-    image: crisp_controllers_demos:franka-robotiq-server9
+    # BASE_IMAGE follows FRANKA_IMAGE, so on a machine without the preserved
+    # image you can point both at a from-source build and this still works.
+    image: ${ROBOTIQ_IMAGE:-crisp_controllers_demos:franka-robotiq-server9}
     build:
       context: .
       dockerfile: docker/Dockerfile.robotiq_server9
+      args:
+        BASE_IMAGE: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-overlay-server9}
     container_name: crisp_controllers_demos_launch_franka_gripper
     command: >
       bash -lc "if [ '${FRANKA_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${GRIPPER_COM_PORT:-/dev/ttyUSB0}; fi &&
@@ -291,10 +295,12 @@ services:
   # franka-overlay-server9 image (different tag / Dockerfile).
   launch_robotiq:
     <<: *franka-overlay
-    image: crisp_controllers_demos:franka-robotiq-server9
+    image: ${ROBOTIQ_IMAGE:-crisp_controllers_demos:franka-robotiq-server9}
     build:
       context: .
       dockerfile: docker/Dockerfile.robotiq_server9
+      args:
+        BASE_IMAGE: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-overlay-server9}
     container_name: crisp_controllers_demos_launch_robotiq
     command: >
       bash -lc "if [ '${FRANKA_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${GRIPPER_COM_PORT:-/dev/ttyUSB0}; fi &&
