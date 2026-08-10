@@ -62,6 +62,16 @@ ARG ROS_SNAPSHOT=2026-03-29
 # deterministic way to bind the snapshot key to the repo.
 # Preflight: fail fast with actionable guidance if the chosen snapshot has no
 # Release file, instead of the cryptic apt "does not have a Release file" error.
+#
+# The pin is enforced with apt PREFERENCES, not just by editing sources. The
+# base image enables packages.ros.org from somewhere outside
+# /etc/apt/sources.list and /etc/apt/sources.list.d (a grep over both finds
+# nothing, yet apt still fetches it), so removing source files is not
+# sufficient: both repos land at priority 500 and apt then picks the HIGHER
+# VERSION -- pinocchio 4.0.0 from the live repo instead of 3.9.0 from the
+# snapshot. preferences.d gives snapshots.ros.org priority 1001 (>1000, so
+# downgrades are allowed) and packages.ros.org priority -1 (never considered).
+# The assertion below then proves the pin actually took effect.
 RUN set -eux; \
     KEY=4B63CF8FDE49746E98FA01DDAD19BAB3CBF125EA; \
     KEYRING=/usr/share/keyrings/ros-snapshot-archive-keyring.gpg; \
@@ -85,6 +95,8 @@ RUN set -eux; \
     fi; \
     printf 'Types: deb\nURIs: http://snapshots.ros.org/%s/%s/ubuntu\nSuites: jammy\nComponents: main\nSigned-By: %s\n' \
       "${ROS_DISTRO}" "${ROS_SNAPSHOT}" "${KEYRING}" > /etc/apt/sources.list.d/ros2-snapshot.sources; \
+    printf 'Package: *\nPin: origin snapshots.ros.org\nPin-Priority: 1001\n\nPackage: *\nPin: origin packages.ros.org\nPin-Priority: -1\n' \
+      > /etc/apt/preferences.d/99-ros-snapshot-pin; \
     apt-get update; \
     cand="$(apt-cache policy ros-humble-pinocchio | awk '/Candidate:/{print $2}')"; \
     case "$cand" in \
@@ -93,7 +105,9 @@ RUN set -eux; \
          echo "       ros-humble-pinocchio candidate is '${cand}', expected 3.9.x from" >&2; \
          echo "       snapshot ${ROS_SNAPSHOT}. Another apt source is shadowing the pin;" >&2; \
          echo "       pinocchio 4.x breaks the pinned crisp_controllers. Sources seen:" >&2; \
-         grep -rE 'ros\.org' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null >&2 || true; \
+         grep -rE 'ros\.org' /etc/apt >&2 2>/dev/null || true; \
+         echo "       --- effective pin ---" >&2; \
+         apt-cache policy >&2; \
          apt-cache policy ros-humble-pinocchio >&2; \
          exit 1 ;; \
     esac; \
