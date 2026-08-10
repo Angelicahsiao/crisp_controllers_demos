@@ -80,9 +80,23 @@ RUN set -eux; \
       | gpg --dearmor > "${KEYRING}"; \
     gpg --show-keys --with-colons "${KEYRING}" | grep -qi "${KEY}"; \
     for f in $(grep -rlE 'ros\.org' /etc/apt/sources.list.d 2>/dev/null); do rm -f "$f"; done; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i -E '/ros\.org/s|^|# disabled-by-snapshot-pin |' /etc/apt/sources.list; \
+    fi; \
     printf 'Types: deb\nURIs: http://snapshots.ros.org/%s/%s/ubuntu\nSuites: jammy\nComponents: main\nSigned-By: %s\n' \
       "${ROS_DISTRO}" "${ROS_SNAPSHOT}" "${KEYRING}" > /etc/apt/sources.list.d/ros2-snapshot.sources; \
     apt-get update; \
+    cand="$(apt-cache policy ros-humble-pinocchio | awk '/Candidate:/{print $2}')"; \
+    case "$cand" in \
+      3.9.*) echo "snapshot pin OK: ros-humble-pinocchio candidate ${cand}" ;; \
+      *) echo "ERROR: snapshot pin is NOT in effect." >&2; \
+         echo "       ros-humble-pinocchio candidate is '${cand}', expected 3.9.x from" >&2; \
+         echo "       snapshot ${ROS_SNAPSHOT}. Another apt source is shadowing the pin;" >&2; \
+         echo "       pinocchio 4.x breaks the pinned crisp_controllers. Sources seen:" >&2; \
+         grep -rE 'ros\.org' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null >&2 || true; \
+         apt-cache policy ros-humble-pinocchio >&2; \
+         exit 1 ;; \
+    esac; \
     apt-get -y -o Dpkg::Options::=--force-confnew \
         --allow-downgrades dist-upgrade || true
 
