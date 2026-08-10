@@ -249,11 +249,15 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_franka_state_broadcaster",
                 default_value="false",
-                description="Spawn franka_robot_state_broadcaster. OFF by default: it "
-                "publishes nine topics per cycle from the 1 kHz realtime loop, which "
-                "overruns the FCI's 1 ms deadline and makes the robot abort with "
-                "communication_constraints_violation. Only enable with a controller "
-                "manager running well below 1 kHz.",
+                description="Spawn franka_robot_state_broadcaster (publishes "
+                "tau_ext_hat_filtered and the external wrench). OFF by default because "
+                "it publishes nine topics per cycle from the 1 kHz realtime loop and can "
+                "overrun the FCI's 1 ms deadline, aborting the robot with "
+                "communication_constraints_violation. Observed: it runs clean with "
+                "use_rviz:=false, and aborted with use_rviz:=True -- rviz2 in the same "
+                "container starves the non-realtime publisher thread. If you enable it, "
+                "run without rviz and treat 'Failed to lock the realtime publisher' as a "
+                "reason to stop immediately.",
             ),
             DeclareLaunchArgument(
                 arm_prefix_parameter_name,
@@ -330,9 +334,18 @@ def generate_launch_description():
             # missed until the robot aborts with
             #   libfranka: Move command aborted: motion aborted by reflex!
             #   ["communication_constraints_violation"]
-            # i.e. enabling it STOPS THE ROBOT. Only turn it on with a controller
-            # manager running well below 1 kHz, and watch for "Failed to lock the
+            # i.e. enabling it CAN STOP THE ROBOT. Watch for "Failed to lock the
             # realtime publisher" -- that message is the precursor to the abort.
+            #
+            # Measured on this setup (fr3 5.8.0, CM at 1 kHz, FIFO prio 50):
+            #   use_rviz:=True  -> trylock failures within seconds, then
+            #                      communication_constraints_violation and abort
+            #   use_rviz:=false -> ~100 s clean, no trylock failures
+            # rviz2 shares the container and competes for CPU/DDS with the RT loop,
+            # which is what pushes the non-realtime publisher thread over the edge.
+            # So: usable WITHOUT rviz, and it is left off by default because the
+            # margin is thin -- soak-test it under your real workload before relying
+            # on it, and prefer external_effort.launch.py when you also need rviz.
             # For a gravity-free torque signal prefer external_effort.launch.py,
             # which runs in its own process and cannot miss the FCI deadline.
             Node(
