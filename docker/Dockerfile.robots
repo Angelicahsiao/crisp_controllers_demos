@@ -80,20 +80,58 @@ RUN sudo apt update && sudo apt-get install -y libglfw3-dev wget \
 
 WORKDIR /home/ros/ros2_ws
 
+# Auto-configure interactive `docker exec` shells. docker exec bypasses
+# /ros_entrypoint.sh, so a plain shell has no ROS 2 sourced, no workspace
+# overlay, and the inherited CYCLONEDDS_URI points at the template config whose
+# interface may not exist here - so bare `ros2 ...` fails (CycloneDDS cannot
+# create the domain). Mirror what the compose launch command sets up. Fully
+# guarded: interactive-only, sources nothing that is absent, and reuses the
+# interface-resolved config the launch already generated (no daemon restart)
+# when it exists, so opening a shell never hangs or aborts.
+RUN cat >> /home/ros/.bashrc <<'EOF'
+
+# --- crisp_controllers_demos: interactive-shell ROS 2 setup ---
+if [[ $- == *i* ]]; then
+  [ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ] && source "/opt/ros/${ROS_DISTRO}/setup.bash"
+  [ -f /home/ros/ros2_ws/install/setup.bash ] && source /home/ros/ros2_ws/install/setup.bash
+  if [ "${RMW:-cyclone}" = "cyclone" ]; then
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    if [ -f /tmp/cyclone_config_resolved.xml ]; then
+      export CYCLONEDDS_URI=file:///tmp/cyclone_config_resolved.xml
+    elif [ -f /home/ros/ros2_ws/src/crisp_controllers_demos/scripts/set_cyclone_config.sh ]; then
+      source /home/ros/ros2_ws/src/crisp_controllers_demos/scripts/set_cyclone_config.sh
+    fi
+  fi
+fi
+# --- end crisp_controllers_demos ---
+EOF
+
 FROM base AS franka
 
 # === FRANKA ROS2 ===
 RUN git clone https://github.com/frankarobotics/franka_ros2.git -b $ROS_DISTRO src/franka_ros2 \
     && source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt-get update \
-    && if [ -f src/franka_ros2/franka.repos ]; then \
-         vcs import src < src/franka_ros2/franka.repos --recursive --skip-existing; \
-       fi \
+    # franka_ros2 renamed franka.repos -> dependency.repos; import whichever exists
+    && for repos in src/franka_ros2/franka.repos src/franka_ros2/dependency.repos; do \
+         if [ -f "$repos" ]; then \
+           vcs import src < "$repos" --recursive --skip-existing; \
+         fi; \
+       done \
     && rosdep update \
     && rosdep install --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y \
-    && touch src/franka_ros2/franka_gazebo/COLCON_IGNORE \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
-    && touch src/franka_ros2/COLCON_IGNORE src/franka_description/COLCON_IGNORE \
+    # libfranka: console_bridge is required by its CMake but missing from its
+    # package.xml (rosdep never installs it); submodules (common/) are required
+    # by add_subdirectory and may not survive the vcs import.
+    && sudo apt-get install -y libconsole-bridge-dev \
+    && if [ -d src/libfranka ]; then git -C src/libfranka submodule update --init --recursive; fi \
+    # Guard every touch: directory layout differs across franka_ros2 versions
+    && if [ -d src/franka_ros2/franka_gazebo ]; then touch src/franka_ros2/franka_gazebo/COLCON_IGNORE; fi \
+    # BUILD_TESTS/BUILD_EXAMPLES=OFF: libfranka's tests need GTest::gmock
+    # imported targets that are unavailable here; not needed in a robot image.
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF \
+    && touch src/franka_ros2/COLCON_IGNORE \
+    && if [ -d src/franka_description ]; then touch src/franka_description/COLCON_IGNORE; fi \
     && if [ -d src/libfranka ]; then touch src/libfranka/COLCON_IGNORE; fi
 
 FROM base AS kinova
@@ -145,11 +183,29 @@ RUN sudo apt-get update && \
 # version string isn't parsed by the version reader). Removing it keeps the
 # meaningful version checks (e-Series < 5.23.0 and PolyScope X < 10.10.0) while
 # letting 10.12.1 through even if the major-version fallback misfires.
+#
+# Pin the git refs. Previously the driver was cloned from the moving `-b $ROS_DISTRO`
+# branch and the client library from its (moving) default branch, while ur_msgs came
+# from the fixed apt release. Once the driver branches advanced they began to call
+# ur_client_library::setTargetPayload (added in liburcl 2.13.0) and to #include
+# ur_msgs/action/send_script.hpp (a SendScript action not in the apt ur_msgs),
+# breaking the build against the pinned-by-apt dependencies. Pinning to a
+# pre-divergence, mutually-compatible set restores a reproducible build:
+#   - ur_client_library 2.12.0: has the ControlMode writeJointCommand overload and
+#     MODE_TORQUE=8, still uses setPayload (no setTargetPayload). Distro-agnostic.
+#   - ur_robot_driver: per-distro tag (driver ships a version line per ROS distro).
+#     Both tags call setPayload and pull no SendScript action, so apt ur_msgs suffices.
+#       humble -> 2.13.1, jazzy -> 3.8.0
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
+    && case "$ROS_DISTRO" in \
+         humble) UR_DRIVER_REF=2.13.1 ;; \
+         jazzy)  UR_DRIVER_REF=3.8.0 ;; \
+         *) echo "ERROR: no pinned ur_robot_driver ref for ROS_DISTRO=$ROS_DISTRO" && exit 1 ;; \
+       esac \
     && mkdir -p /tmp/ur_src/src && cd /tmp/ur_src/src \
-    && git clone --depth 1 -b $ROS_DISTRO \
+    && git clone --depth 1 -b "$UR_DRIVER_REF" \
         https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git \
-    && git clone --depth 1 \
+    && git clone --depth 1 -b 2.12.0 \
         https://github.com/UniversalRobots/Universal_Robots_Client_Library.git \
     && cd /tmp/ur_src \
     && sed -i \
@@ -182,13 +238,28 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
 
 FROM ur AS ur-overlay
 
-ARG CRISP_CONTROLLERS_VERSION=1.1.0
+# 2.4.1 (not 1.1.0): modern ROS apt (humble and jazzy) now ships pinocchio 3.x/4.x,
+# and no crisp_controllers 1.x release compiles against it - 1.x includes
+# pinocchio-2-era .hxx headers (e.g. frames.hxx) that pinocchio 3+ removed, plus
+# plain <pinocchio/multibody/model.hpp> that only resolves via the deprecated/merged
+# include root. 2.x uses .hpp includes throughout; 2.4.1 is the latest release and
+# tracks upstream's current pinocchio support (same version as franka-overlay).
+# CAVEAT: this bumps UR from 1.1.0, so UR controller/torque parameters may differ
+# from the old image; that version skew is the first suspect if behavior changes.
+ARG CRISP_CONTROLLERS_VERSION=2.4.1
 
 COPY . src/crisp_controllers_demos
 
 RUN git clone --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
-RUN git clone https://github.com/utiasDSL/crisp_py.git src/crisp_py
-RUN git clone --branch humble https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper
+# crisp_py pinned to v3.6.0 (== the default-branch HEAD the working build used)
+# so image builds are reproducible instead of tracking a moving default branch.
+RUN git clone --branch v3.6.0 --depth 1 https://github.com/utiasDSL/crisp_py.git src/crisp_py
+# ros2_robotiq_gripper pinned to the humble-branch commit the working build used.
+# Its only tag (0.0.1) predates this branch, so pin by commit: a full clone (no
+# --depth) then checkout stays valid even after the humble branch advances. The
+# vcs import below reads ros2_robotiq_gripper.humble.repos from this checkout.
+RUN git clone https://github.com/PickNikRobotics/ros2_robotiq_gripper.git src/ros2_robotiq_gripper \
+    && git -C src/ros2_robotiq_gripper checkout a29c69b7516b7a97737b5e43e118e6598ace0832
 
 RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && sudo apt update \
@@ -197,16 +268,28 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    # BUILD_TESTING=OFF: the humble-branch ros2_robotiq_gripper test
+    # (test_robotiq_gripper_hardware_interface.cpp) calls the removed
+    # ResourceManager(std::string) ctor, which no longer exists on jazzy's
+    # hardware_interface; tests aren't needed in the image. Harmless on humble.
+    # pinocchio flags (see franka-overlay): Boost.MPL joint-variant limit + the
+    # deprecated include root for headers included without linking the target.
+    # Distro-generic path; the -I is simply ignored where the dir is absent.
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=OFF \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/$ROS_DISTRO/include/pinocchio/deprecated" \
         --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
 FROM franka AS franka-overlay
 
-ARG CRISP_CONTROLLERS_VERSION=1.1.0
+# 2.4.1: no crisp_controllers 1.x release compiles against the pinocchio 3.x/4.x
+# now shipped by ROS apt - 1.x includes pinocchio-2-era .hxx headers (frames.hxx)
+# that pinocchio 3 removed. 2.x uses .hpp includes throughout; 2.4.1 is the latest
+# release and matches ur-overlay (both overlays share this version).
+ARG CRISP_CONTROLLERS_VERSION=2.4.1
 
-# COPY . src/crisp_controllers_demos
+COPY . src/crisp_controllers_demos
 
 RUN git clone  --branch v${CRISP_CONTROLLERS_VERSION} --depth 1 https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers
 RUN git clone https://github.com/danielsanjosepro/franka_broadcasters.git src/franka_broadcasters
@@ -221,8 +304,18 @@ RUN source /opt/ros/$ROS_DISTRO/setup.bash \
     && rosdep install -q --from-paths src --ignore-src -y \ 
     && colcon build --symlink-install \
         --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select serial \
+    # apt now ships pinocchio 4.0.0. Two consequences for building the
+    # pinocchio-2/3-era crisp_controllers against it:
+    #  - BOOST_MPL flags: the joint variant exceeds Boost.MPL's default 20-type
+    #    list limit ("boost::variant ... has no member 'storage_'").
+    #  - deprecated include root: the classic <pinocchio/multibody/data.hpp>,
+    #    <pinocchio/spatial/explog.hpp> etc. now live only under
+    #    include/pinocchio/deprecated/pinocchio/...; files that include pinocchio
+    #    headers without linking the target don't inherit that path, so add it.
     && colcon build --symlink-install \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/$ROS_DISTRO/include/pinocchio/deprecated" \
+        --packages-select crisp_controllers crisp_mujoco_sim crisp_controllers_robot_demos crisp_py robotiq_description robotiq_driver robotiq_controllers
 
 
 FROM kinova AS kinova-overlay

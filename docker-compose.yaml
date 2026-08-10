@@ -130,9 +130,11 @@ x-kinova-overlay: &kinova-overlay
       ROS_DISTRO: ${ROS_DISTRO_ROBOTS:-jazzy}
     target: kinova-overlay
 
-# UR and Franka pin to Humble at both build- and run-time. The runtime
-# environment block is redefined (YAML merge does not deep-merge env maps)
-# so /ros_entrypoint.sh sources /opt/ros/humble/setup.bash on container start.
+# UR follows ROS_DISTRO (default humble; e.g. ROS_DISTRO=jazzy builds and runs
+# the jazzy image) at both build- and run-time - the launch commands source
+# /opt/ros/${ROS_DISTRO:-humble}/setup.bash. The runtime environment block is
+# redefined (YAML merge does not deep-merge env maps) so ROS_DISTRO reaches the
+# container and /ros_entrypoint.sh sources the matching setup.bash on start.
 x-ur-overlay: &ur-overlay
   <<: *base
   image: crisp_controllers_demos:ur-overlay
@@ -170,14 +172,28 @@ x-franka: &franka
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
-    RMW: ${RMW:-fastdds}
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
     ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
     ROS_DISTRO: ${ROS_DISTRO:-humble}
+    # kept for the RMW=fastdds fallback (host networking needs UDPv4-only)
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
+# PATH B (server-9 robot, FR3 system 5.8.0): the franka services run the
+# PRESERVED server-9 image (libfranka 0.15.0 / franka_ros2 1.0.0 /
+# franka_description 0.4.0), which matches this robot's FCI server version 9.
+# The current Dockerfile builds the server-10 stack (libfranka 0.20), which
+# CANNOT talk to a server-9 robot, so we do NOT rebuild here.
+#   Default image: crisp_controllers_demos:franka-overlay-server9 (tag the
+#   old image once: docker tag <old_id> crisp_controllers_demos:franka-overlay-server9)
+#   Override with FRANKA_IMAGE=... to use a different build.
+# WARNING: do NOT run `docker compose build franka-overlay` / `up --build` on
+# these services — it would rebuild the server-10 stack and overwrite the
+# preserved server-9 image. Plain `docker compose up` reuses the image and is safe.
 x-franka-overlay: &franka-overlay
   <<: *base
-  image: crisp_controllers_demos:franka-overlay
+  image: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-overlay-server9}
   build:
     context: .
     dockerfile: docker/Dockerfile.robots
@@ -190,9 +206,12 @@ x-franka-overlay: &franka-overlay
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-1}
     RCUTILS_COLORIZED_OUTPUT: 1
     SHELL: /bin/bash
-    RMW: ${RMW:-fastdds}
+    RMW: ${RMW:-cyclone}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    CYCLONEDDS_URI: file:///home/ros/ros2_ws/src/crisp_controllers_demos/config/cyclone_config.xml
     ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-enp0s31f6}
     ROS_DISTRO: ${ROS_DISTRO:-humble}
+    # kept for the RMW=fastdds fallback (host networking needs UDPv4-only)
     FASTDDS_BUILTIN_TRANSPORTS: UDPv4
 
 
@@ -226,21 +245,79 @@ services:
 
   launch_franka:
     <<: *franka-overlay
+    container_name: crisp_controllers_demos_launch_franka
     command: >
       bash -lc "source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
-      RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos franka.launch.py
       arm_id:=fr3 use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false} robot_ip:=${ROBOT_IP:-172.16.0.2} use_rviz:=True"
 
-  launch_dual_franka:
+  # Franka + Robotiq 2F-140 at the flange (replaces the Franka Hand). The
+  # gripper needs the USB-to-RS485 device, exposed via the /dev mount.
+  launch_franka_gripper:
     <<: *franka-overlay
+    # Thin layer with robotiq_controllers (the Robotiq runs on its own
+    # controller_manager inside franka.launch.py when use_gripper:=true).
+    image: crisp_controllers_demos:franka-robotiq-server9
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robotiq_server9
+    container_name: crisp_controllers_demos_launch_franka_gripper
     command: >
-      bash -lc "source /opt/ros/humble/setup.bash &&
+      bash -lc "if [ '${FRANKA_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${GRIPPER_COM_PORT:-/dev/ttyUSB0}; fi &&
+      source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
-      RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos franka.launch.py
+      arm_id:=fr3
+      use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
+      robot_ip:=${ROBOT_IP:-172.16.0.2}
+      use_gripper:=true
+      load_gripper:=false
+      com_port:=${GRIPPER_COM_PORT:-/dev/ttyUSB0}
+      use_rviz:=True"
+
+  # Standalone Robotiq 2F-140 on its OWN controller_manager (server-9 stack).
+  # Uses a thin layer over franka-overlay-server9 that adds robotiq_controllers
+  # (missing from the preserved image). Test the gripper in isolation before
+  # integrating with the franka arm. Building this thin layer does NOT touch the
+  # franka-overlay-server9 image (different tag / Dockerfile).
+  launch_robotiq:
+    <<: *franka-overlay
+    image: crisp_controllers_demos:franka-robotiq-server9
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robotiq_server9
+    container_name: crisp_controllers_demos_launch_robotiq
+    command: >
+      bash -lc "if [ '${FRANKA_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${GRIPPER_COM_PORT:-/dev/ttyUSB0}; fi &&
+      source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      ros2 launch crisp_controllers_robot_demos robotiq_gripper_standalone.launch.py
+      com_port:=${GRIPPER_COM_PORT:-/dev/ttyUSB0}
+      use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}"
+
+  launch_dual_franka:
+    <<: *franka-overlay
+    container_name: crisp_controllers_demos_launch_dual_franka
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos dual_franka.launch.py
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
       left_robot_ip:=${LEFT_ROBOT_IP:-172.16.1.2} right_robot_ip:=${RIGHT_ROBOT_IP:-172.16.0.2}"
@@ -249,7 +326,7 @@ services:
     <<: *ur-overlay
     container_name: crisp_controllers_demos_launch_ur
     command: >
-      bash -lc "source /opt/ros/humble/setup.bash &&
+      bash -lc "source /opt/ros/${ROS_DISTRO:-humble}/setup.bash &&
       cd ~/ros2_ws &&
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
@@ -268,7 +345,7 @@ services:
     container_name: crisp_controllers_demos_launch_ur_gripper
     command: >
       bash -lc "if [ '${UR_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${UR_COM_PORT:-/dev/ttyUSB0}; fi &&
-      source /opt/ros/humble/setup.bash &&
+      source /opt/ros/${ROS_DISTRO:-humble}/setup.bash &&
       cd ~/ros2_ws &&
       colcon build --symlink-install --packages-select crisp_controllers_robot_demos &&
       source install/setup.bash &&
@@ -321,6 +398,38 @@ services:
       bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
       RMW=${RMW:-} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch realsense2_camera rs_launch.py camera_name:=\${CAMERA_NAME:-right_wrist_camera} camera_namespace:=\${CAMERA_NAMESPACE:-right}"
+
+  launch_realsense_env_camera:
+    <<: *realsense-cameras-overlay
+    container_name: crisp_controllers_demos_realsense_env
+    # environment:
+    #   ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    command: >
+      bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
+      export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp &&
+      echo 'Using the serial number: $${SERIAL_NUMBER}' &&
+      ros2 launch realsense2_camera rs_launch.py \
+      camera_name:='env_cam' \
+      camera_namespace:='env' \
+      rgb_camera.color_profile:=640x480x15 \
+      enable_depth:=false \
+      serial_no:=_332322073530"
+
+  launch_realsense_wrist_camera:
+    <<: *realsense-cameras-overlay
+    container_name: crisp_controllers_demos_realsense_wrist
+    # environment:
+    #   ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-lo}
+    command: >
+      bash -c "source /opt/ros/${ROS_DISTRO_CAMERAS:-humble}/setup.bash &&
+      export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp &&
+      echo 'Using the serial number: $${SERIAL_NUMBER}' &&
+      ros2 launch realsense2_camera rs_launch.py \
+      camera_name:='wrist_cam' \
+      camera_namespace:='wrist' \
+      rgb_camera.color_profile:=640x480x15 \
+      enable_depth:=false \
+      serial_no:=_218722270823"
 
   launch_camera:
     <<: *usb-cameras-base

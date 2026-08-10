@@ -4,7 +4,7 @@ import xacro
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, Shutdown
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -82,6 +82,16 @@ def robot_description_dependent_nodes_spawner(
         controllers_yaml,
     )
 
+    # The ros2_control node moved between distros: Humble's ur_robot_driver ships a
+    # custom ur_ros2_control_node; Jazzy removed it and relies on the generic
+    # controller_manager/ros2_control_node (which loads the same ur_robot_driver
+    # plugin). Both take the controllers YAML + robot_description the same way.
+    ros_distro = os.environ.get("ROS_DISTRO", "humble")
+    if ros_distro == "humble":
+        control_node_pkg, control_node_exe = "ur_robot_driver", "ur_ros2_control_node"
+    else:
+        control_node_pkg, control_node_exe = "controller_manager", "ros2_control_node"
+
     return [
         Node(
             package="robot_state_publisher",
@@ -92,8 +102,8 @@ def robot_description_dependent_nodes_spawner(
             condition=IfCondition(start_robot_state_publisher),
         ),
         Node(
-            package="ur_robot_driver",
-            executable="ur_ros2_control_node",
+            package=control_node_pkg,
+            executable=control_node_exe,
             parameters=[
                 ur_controllers,
                 {"robot_description": robot_description},
@@ -214,6 +224,16 @@ def generate_launch_description():
                 executable="spawner",
                 arguments=["joint_trajectory_controller", "--inactive"],
                 output="screen",
+            ),
+            # Velocity command interface, used by the velocity_sweep script for
+            # friction calibration. Inactive: it conflicts with the effort
+            # controllers, which claim the same joints.
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["forward_velocity_controller", "--inactive"],
+                output="screen",
+                condition=UnlessCondition(use_fake_hardware),
             ),
             Node(
                 package="controller_manager",

@@ -9,6 +9,15 @@
       joint_trajectory_controller:
         type: joint_trajectory_controller/JointTrajectoryController
 
+      # Claims the hardware's `velocity` command interface. Used by the
+      # velocity_sweep script to drive constant-velocity motion for friction
+      # identification (hand-guided sweeps are too jerky: the calibration's
+      # constant-velocity filter rejected nearly all of those samples).
+      # Spawned INACTIVE — a joint can only be claimed by one command interface at
+      # a time, so activating this requires deactivating the effort controllers.
+      forward_velocity_controller:
+        type: velocity_controllers/JointGroupVelocityController
+
       joint_state_broadcaster:
         type: joint_state_broadcaster/JointStateBroadcaster
 
@@ -47,6 +56,16 @@
       state_interfaces:
         - position
         - velocity
+      joints:
+        - shoulder_pan_joint
+        - shoulder_lift_joint
+        - elbow_joint
+        - wrist_1_joint
+        - wrist_2_joint
+        - wrist_3_joint
+
+  forward_velocity_controller:
+    ros__parameters:
       joints:
         - shoulder_pan_joint
         - shoulder_lift_joint

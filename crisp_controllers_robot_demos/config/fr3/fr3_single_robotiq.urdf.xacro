@@ -1,0 +1,75 @@
+<?xml version='1.0' encoding='utf-8'?>
+
+<!-- FR3 with a Robotiq 2F-85 on the flange instead of the Franka Hand.
+     The Robotiq is VISUAL-only here (include_ros2_control=false); its control
+     runs on a separate controller_manager (robotiq_2f85_standalone.urdf.xacro)
+     because franka_hardware rejects a single finger position interface. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fr3">
+
+  <xacro:include filename="$(find crisp_controllers_robot_demos)/config/fr3/fr3.urdf.xacro"/>
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
+
+  <xacro:arg name="no_prefix" default="false"/>
+  <xacro:arg name="with_sc" default="false" />
+  <xacro:arg name="robot_ip" default="172.16.0.2" />
+  <xacro:arg name="use_fake_hardware" default="false" />
+  <xacro:arg name="fake_sensor_commands" default="false" />
+  <xacro:arg name="gazebo" default="false" />
+  <xacro:arg name="gazebo_effort" default="true" />
+  <xacro:arg name="arm_prefix" default="" />
+  <xacro:arg name="has_camera" default="false" />
+
+  <!-- Serial device of the Robotiq USB-to-RS485 adapter. -->
+  <xacro:arg name="com_port" default="/dev/ttyUSB0" />
+
+  <xacro:property name="arm_prefix_modified" value="${'' if xacro.arg('arm_prefix') == '' else xacro.arg('arm_prefix') + '_'}" />
+
+  <!-- No Franka Hand: the Robotiq replaces it at the flange. -->
+  <xacro:fr3
+    arm_id="fr3"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    arm_prefix="$(arg arm_prefix)"
+    hand="false"
+  />
+
+  <!-- Mounted on the flange (fr3_link8). Adjust the origin to match your
+       coupling: the Franka Hand convention rotates the EE by -45 deg about Z,
+       and a coupling kit adds a Z offset. -->
+  <!-- include_ros2_control="false": the Robotiq is VISUAL-only in the franka
+       URDF (links/TF). Its control lives on a SEPARATE /robotiq
+       controller_manager (robotiq_2f140_standalone.urdf.xacro), because
+       franka_hardware rejects a single finger position interface in franka's
+       controller_manager ("Expected 7, given 1"). -->
+  <xacro:robotiq_gripper
+    name="RobotiqGripperHardwareInterface"
+    prefix="${arm_prefix_modified}"
+    parent="${arm_prefix_modified}fr3_link8"
+    use_fake_hardware="$(arg use_fake_hardware)"
+    com_port="$(arg com_port)"
+    include_ros2_control="false">
+    <origin xyz="0 0 0" rpy="0 0 ${-pi/4}"/>
+  </xacro:robotiq_gripper>
+
+  <!-- Robotiq 2F-85 TCP: 0.1025 m along the approach axis (Z) from the gripper
+       base (matches the measured ~0.103 m). The base's internal +90 deg
+       clocking is part of the macro, so it is inherited here. This recreates
+       the deploy-side robotiq_gripper_tcp frame, which the stock 2F-85 macro
+       does not provide. -->
+  <link name="${arm_prefix_modified}robotiq_gripper_tcp"/>
+  <joint name="${arm_prefix_modified}robotiq_gripper_tcp_joint" type="fixed">
+    <parent link="${arm_prefix_modified}robotiq_85_base_link"/>
+    <child link="${arm_prefix_modified}robotiq_gripper_tcp"/>
+    <origin xyz="0 0 0.1025" rpy="0 0 0"/>
+  </joint>
+  <!-- crisp_controllers CIC (controllers.yaml end_effector_frame) and crisp_py
+       (RobotConfig.target_frame) both use fr3_hand_tcp; make it coincident with
+       the gripper TCP so the control frame is explicit, not a fallback. -->
+  <link name="${arm_prefix_modified}fr3_hand_tcp"/>
+  <joint name="${arm_prefix_modified}fr3_hand_tcp_joint" type="fixed">
+    <parent link="${arm_prefix_modified}robotiq_gripper_tcp"/>
+    <child link="${arm_prefix_modified}fr3_hand_tcp"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

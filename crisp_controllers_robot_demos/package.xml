@@ -9,6 +9,17 @@
 
   <depend>xacro</depend>
   <depend>joint_state_publisher</depend>
+  <!-- external_effort_node: gravity-free joint effort via Pinocchio -->
+  <depend>pinocchio</depend>
+  <depend>python3-numpy</depend>
+  <!-- identify_payload: wrist F/T + TF payload mass/COM identification -->
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <!-- external_effort.launch.py visualize:=true -->
+  <exec_depend>rqt_plot</exec_depend>
+  <!-- velocity_sweep: switch_controller service + velocity command controller -->
+  <depend>controller_manager_msgs</depend>
+  <exec_depend>velocity_controllers</exec_depend>
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

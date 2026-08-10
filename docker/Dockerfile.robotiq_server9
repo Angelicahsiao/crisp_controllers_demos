@@ -1,0 +1,20 @@
+# Thin layer over the preserved server-9 franka image.
+#
+# The server-9 image (crisp_controllers_demos:franka-overlay-server9) has the
+# ros2_robotiq_gripper source (commit e78b482, 2025-08-29) with
+# robotiq_description + robotiq_driver built, but NOT robotiq_controllers
+# (the RobotiqActivationController plugin). Build just that one package here,
+# against the same commit, so it's ABI-compatible with the driver already
+# present. This keeps the (matched, server-9) franka stack untouched.
+#
+# Build with:  docker compose build launch_robotiq   (or launch_franka_gripper)
+# Requires the base tag to exist:
+#   docker tag <old_franka_overlay_id> crisp_controllers_demos:franka-overlay-server9
+FROM crisp_controllers_demos:franka-overlay-server9
+
+RUN bash -lc "source /opt/ros/humble/setup.bash \
+    && source /home/ros/ros2_ws/install/setup.bash \
+    && cd /home/ros/ros2_ws \
+    && colcon build --symlink-install \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        --packages-select robotiq_controllers"

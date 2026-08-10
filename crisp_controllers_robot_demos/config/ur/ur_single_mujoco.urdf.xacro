@@ -18,19 +18,40 @@
 
   <link name="world"/>
 
-  <!-- Kinematic/visual URDF only — generate_ros2_control_tag=false because the
-       hardware is the MuJoCo simulator below, not the UR driver/mock. -->
-  <xacro:ur_robot
-    name="${ur_type_val}"
-    tf_prefix="${tf_prefix_val}"
-    parent="world"
-    joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
-    kinematics_parameters_file="$(arg kinematics_parameters_file)"
-    physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
-    visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
-    generate_ros2_control_tag="false">
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-  </xacro:ur_robot>
+  <!-- Kinematic/visual URDF only; the hardware is the MuJoCo simulator below, not
+       the UR driver/mock. ur_description's ur_robot macro differs by distro:
+       - Humble: also emits a <ros2_control> block, suppressed with
+         generate_ros2_control_tag="false" so it does not clash with the MuJoCo
+         ros2_control system defined below.
+       - Jazzy+: the macro is kinematic-only and has no generate_ros2_control_tag
+         parameter, so passing it raises 'Invalid parameter generate_ros2_control_tag'.
+       Branch on ROS_DISTRO so the same file works on both. -->
+  <xacro:arg name="ros_distro" default="$(env ROS_DISTRO)"/>
+  <xacro:if value="${xacro.arg('ros_distro') == 'humble'}">
+    <xacro:ur_robot
+      name="${ur_type_val}"
+      tf_prefix="${tf_prefix_val}"
+      parent="world"
+      joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+      kinematics_parameters_file="$(arg kinematics_parameters_file)"
+      physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml"
+      generate_ros2_control_tag="false">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:ur_robot>
+  </xacro:if>
+  <xacro:unless value="${xacro.arg('ros_distro') == 'humble'}">
+    <xacro:ur_robot
+      name="${ur_type_val}"
+      tf_prefix="${tf_prefix_val}"
+      parent="world"
+      joint_limits_parameters_file="$(find ur_description)/config/${ur_type_val}/joint_limits.yaml"
+      kinematics_parameters_file="$(arg kinematics_parameters_file)"
+      physical_parameters_file="$(find ur_description)/config/${ur_type_val}/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/${ur_type_val}/visual_parameters.yaml">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:ur_robot>
+  </xacro:unless>
 
   <!-- MuJoCo-backed arm: effort command + position/velocity/effort state,
        exactly the interface set crisp_mujoco_sim/Simulator requires.
