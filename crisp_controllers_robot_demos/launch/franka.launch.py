@@ -250,14 +250,14 @@ def generate_launch_description():
                 "use_franka_state_broadcaster",
                 default_value="false",
                 description="Spawn franka_robot_state_broadcaster (publishes "
-                "tau_ext_hat_filtered and the external wrench). OFF by default because "
-                "it publishes nine topics per cycle from the 1 kHz realtime loop and can "
-                "overrun the FCI's 1 ms deadline, aborting the robot with "
-                "communication_constraints_violation. Observed: it runs clean with "
-                "use_rviz:=false, and aborted with use_rviz:=True -- rviz2 in the same "
-                "container starves the non-realtime publisher thread. If you enable it, "
-                "run without rviz and treat 'Failed to lock the realtime publisher' as a "
-                "reason to stop immediately.",
+                "tau_ext_hat_filtered and the external wrench). OFF by default and NOT "
+                "recommended at 1 kHz: it publishes nine topics per cycle from the "
+                "realtime loop, leaving so little headroom that any burst of "
+                "non-realtime work (rviz, a teleop client attaching, an action-goal "
+                "callback) overruns the FCI's 1 ms deadline and aborts the robot with "
+                "communication_constraints_violation. It survived ~100 s idle without "
+                "rviz and still aborted on the first trajectory goal. Prefer "
+                "external_effort.launch.py, which runs out-of-process.",
             ),
             DeclareLaunchArgument(
                 arm_prefix_parameter_name,
@@ -338,14 +338,20 @@ def generate_launch_description():
             # realtime publisher" -- that message is the precursor to the abort.
             #
             # Measured on this setup (fr3 5.8.0, CM at 1 kHz, FIFO prio 50):
-            #   use_rviz:=True  -> trylock failures within seconds, then
-            #                      communication_constraints_violation and abort
-            #   use_rviz:=false -> ~100 s clean, no trylock failures
-            # rviz2 shares the container and competes for CPU/DDS with the RT loop,
-            # which is what pushes the non-realtime publisher thread over the edge.
-            # So: usable WITHOUT rviz, and it is left off by default because the
-            # margin is thin -- soak-test it under your real workload before relying
-            # on it, and prefer external_effort.launch.py when you also need rviz.
+            #   use_rviz:=True  -> trylock failures within seconds, then abort
+            #   use_rviz:=false -> ~100 s clean while IDLE, then aborted anyway as
+            #                      soon as a client sent a joint-trajectory goal
+            # So rviz is NOT the deciding factor -- it was simply one source of extra
+            # load. The broadcaster leaves so little realtime headroom that ANY burst
+            # of non-realtime work (rviz, a teleop client attaching, an action-goal
+            # callback) is enough to miss the FCI deadline and stop the arm. An idle
+            # run proves nothing.
+            #
+            # Recommendation: do NOT enable this at 1 kHz. Use
+            # external_effort.launch.py, which computes tau_ext out-of-process and
+            # cannot miss the deadline. Enable this only if you have throttled the
+            # broadcaster's publishing or are running a controller manager well below
+            # 1 kHz -- and never on a robot doing real work without a soak test.
             # For a gravity-free torque signal prefer external_effort.launch.py,
             # which runs in its own process and cannot miss the FCI deadline.
             Node(
