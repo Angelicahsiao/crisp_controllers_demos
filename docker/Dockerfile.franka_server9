@@ -10,14 +10,21 @@
 # Pins (extracted from the working image):
 #   libfranka            0.15.0  @155ddac  (FCI server 9; needs FR3 >= 5.7.2)
 #                                          BUILT FROM SOURCE; apt's is skipped
-#   franka_ros2          v1.0.0  @ee7e659  (monorepo: franka_hardware/gripper/msgs in-tree;
-#                                            franka_description resolved from apt via rosdep.
-#                                            Old pin @82ae42f is no longer reachable upstream.)
+#   franka_ros2          v1.0.0  @ee7e659  (monorepo: franka_hardware/gripper/msgs in-tree.
+#                                           gazebo/moveit/examples pruned -- see the franka step.
+#                                           Old pin @82ae42f is unreachable upstream.)
+#   franka_description   0.4.0   @677ae3d  (from source; not in the monorepo)
 #   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
 #   crisp_controllers    v1.1.0  @db1d81a  (needs MPL + deprecated-include shims;
 #                                           see the crisp step for why)
-#   crisp_py                     @49b1665
-#   apt snapshot         humble/2026-03-29 (pinocchio 3.9.0-1jammy.20260304; verified)
+#   crisp_py             v3.4.0  @49b1665
+#   apt snapshot         humble/2026-03-29 (pinocchio 3.9.0-1jammy.20260304; enforced by
+#                                           apt preferences + a build-time assertion)
+#   base image           osrf/ros:humble-desktop pinned by digest (see ARG BASE_IMAGE)
+#
+# NOT included (deliberately, unlike the preserved image): MuJoCo / crisp_mujoco_sim,
+# so use_fake_hardware:=true will NOT work; and MoveIt / Gazebo-Ignition.
+# Validated on real hardware: FR3 5.8.0 (FCI server 9) connects, controllers activate.
 #
 # Build (from the repo root):
 #   docker build -f docker/Dockerfile.franka_server9 \
@@ -33,7 +40,17 @@
 # "apt snapshot" notes below.
 
 ARG ROS_DISTRO=humble
-FROM osrf/ros:${ROS_DISTRO}-desktop AS base
+# Base image pinned BY DIGEST, not by the mutable :humble-desktop tag. That tag
+# was re-pointed upstream mid-effort, which silently invalidated the whole build
+# cache and swapped the base out from under a "reproducible" build. This digest
+# is the one a full, hardware-validated build was produced from -- do not bump it
+# without re-running the verification in the header above.
+# Override for an intentional base change:
+#   docker build --build-arg BASE_IMAGE=osrf/ros:humble-desktop@sha256:<new> ...
+# Note: this file is humble-specific regardless of ROS_DISTRO (the apt-pin
+# assertion below checks ros-humble-pinocchio by name).
+ARG BASE_IMAGE=osrf/ros:humble-desktop@sha256:2d29e5fae26dea36b4453c1ff4b0194ccc835e7cccf24081ca6b5039369df587
+FROM ${BASE_IMAGE} AS base
 
 # --- Pin apt to the server-9-era ROS snapshot (pinocchio 3.9.0) -------------
 # Repoint every ROS apt source (classic .list or deb822 .sources) at the dated
