@@ -24,7 +24,7 @@ from launch.actions import (
     OpaqueFunction,
     Shutdown,
 )
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     AndSubstitution,
@@ -311,6 +311,20 @@ def generate_launch_description():
                 executable="spawner",
                 arguments=["external_torques_broadcaster"],
                 output="screen",
+            ),
+            # Franka's onboard external-torque / wrench estimate. Only meaningful
+            # on real hardware: the FCI computes it, and the fake-hardware plugin
+            # exports no <arm_id>/robot_state interface for it to read.
+            # Publishes ~/external_joint_torques and ~/robot_state; both read ~0
+            # with no contact ONCE the end-effector load is configured (Desk ->
+            # Settings -> End Effector, or the ~/set_load service). Without that,
+            # the gripper's weight shows up as a phantom external torque.
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["franka_robot_state_broadcaster"],
+                output="screen",
+                condition=UnlessCondition(use_fake_hardware),
             ),
             Node(
                 package="controller_manager",
