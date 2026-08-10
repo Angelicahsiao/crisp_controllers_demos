@@ -14,7 +14,8 @@
 #                                            franka_description resolved from apt via rosdep.
 #                                            Old pin @82ae42f is no longer reachable upstream.)
 #   ros2_robotiq_gripper         @e78b482  (build description + driver + controllers)
-#   crisp_controllers    0.1.0   @db1d81a  (compiles against pinocchio 3.9.0, no MPL/deprecated shims)
+#   crisp_controllers    v1.1.0  @db1d81a  (needs MPL + deprecated-include shims;
+#                                           see the crisp step for why)
 #   crisp_py                     @49b1665
 #   apt snapshot         humble/2026-03-29 (pinocchio 3.9.0-1jammy.20260304; verified)
 #
@@ -182,6 +183,27 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && rm -rf /var/lib/apt/lists/*
 
 # --- crisp: crisp_controllers @db1d81a + crisp_py @49b1665 + demos package ----
+# crisp_controllers @db1d81a is tag v1.1.0 (NOT 0.1.0 as an earlier version of
+# this header claimed). The preserved image runs exactly this commit against
+# pinocchio 3.9.0-1jammy.20260214, so v1.1.0 and pinocchio 3.9 are compatible.
+#
+# The snapshots still on the mirror ship a LATER REBUILD of the same upstream
+# version, 3.9.0-1jammy.20260304, whose installed header layout differs: the
+# classic <pinocchio/multibody/model.hpp> and the .hxx implementation headers
+# (e.g. algorithm/frames.hxx) are no longer at their historical paths, so the
+# build fails with "No such file or directory". No February snapshot exists on
+# snapshots.ros.org any more (probing 2026-02-01..2026-05-31 yields only
+# 2026-03-29 and 2026-05-14), so the 20260214 build cannot be pinned.
+#
+# Flags below are the recipe already proven in Dockerfile.robots for a
+# reorganized pinocchio:
+#   - BOOST_MPL_*: pinocchio 3's joint variant has 25 types, above Boost.MPL's
+#     default 20-type list limit ("boost::variant ... has no member 'storage_'").
+#   - -I .../pinocchio/deprecated: compat root holding the classic header paths.
+#     A non-existent -I directory is ignored by gcc, so this is safe if the
+#     layout differs; if the build still fails on missing pinocchio headers, the
+#     remaining option is bumping crisp_controllers to v2.3.1+ (which uses .hpp
+#     includes throughout) -- at the cost of differing from the preserved image.
 COPY . src/crisp_controllers_demos
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && git clone https://github.com/utiasDSL/crisp_controllers.git src/crisp_controllers \
@@ -191,6 +213,7 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && . ${WS}/install/setup.sh \
     && apt-get update && rosdep update \
     && rosdep install -q --from-paths src --ignore-src -y --rosdistro ${ROS_DISTRO} \
     && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        "-DCMAKE_CXX_FLAGS=-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=30 -I/opt/ros/${ROS_DISTRO}/include/pinocchio/deprecated" \
         --packages-select crisp_controllers crisp_py crisp_controllers_robot_demos \
     && rm -rf /var/lib/apt/lists/*
 
