@@ -24,7 +24,7 @@ from launch.actions import (
     OpaqueFunction,
     Shutdown,
 )
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     AndSubstitution,
@@ -179,6 +179,7 @@ def generate_launch_description():
     start_robot_state_publisher = LaunchConfiguration(start_robot_state_publisher_name)
     use_gripper = LaunchConfiguration(use_gripper_parameter_name)
     com_port = LaunchConfiguration(com_port_parameter_name)
+    use_franka_state_broadcaster = LaunchConfiguration("use_franka_state_broadcaster")
 
     rviz_file = os.path.join(
         get_package_share_directory("franka_description"),
@@ -246,6 +247,15 @@ def generate_launch_description():
                 description="Serial device of the Robotiq USB-to-RS485 adapter.",
             ),
             DeclareLaunchArgument(
+                "use_franka_state_broadcaster",
+                default_value="false",
+                description="Spawn franka_robot_state_broadcaster. OFF by default: it "
+                "publishes nine topics per cycle from the 1 kHz realtime loop, which "
+                "overruns the FCI's 1 ms deadline and makes the robot abort with "
+                "communication_constraints_violation. Only enable with a controller "
+                "manager running well below 1 kHz.",
+            ),
+            DeclareLaunchArgument(
                 arm_prefix_parameter_name,
                 default_value="",
                 description="The prefix of the arm.",
@@ -306,25 +316,35 @@ def generate_launch_description():
                 arguments=["pose_broadcaster"],
                 output="screen",
             ),
-            Node(
-                package="controller_manager",
-                executable="spawner",
-                arguments=["external_torques_broadcaster"],
-                output="screen",
-            ),
-            # Franka's onboard external-torque / wrench estimate. Only meaningful
-            # on real hardware: the FCI computes it, and the fake-hardware plugin
-            # exports no <arm_id>/robot_state interface for it to read.
-            # Publishes ~/external_joint_torques and ~/robot_state; both read ~0
-            # with no contact ONCE the end-effector load is configured (Desk ->
-            # Settings -> End Effector, or the ~/set_load service). Without that,
-            # the gripper's weight shows up as a phantom external torque.
+            # external_torques_broadcaster is NOT spawned: its plugin lives in
+            # franka_force_feedback_controllers (danielsanjosepro/franka_broadcasters),
+            # which is absent from BOTH the preserved image and the from-source
+            # rebuild (confirmed via `ros2 control list_controller_types`), so
+            # spawning it only produced a FATAL on every startup.
+            #
+            # DANGER -- franka_robot_state_broadcaster is OFF BY DEFAULT.
+            # Its update() publishes NINE topics per cycle (one realtime publisher
+            # plus eight plain ->publish() calls) directly inside the 1 kHz RT loop.
+            # On this setup that overruns the control cycle: the realtime publisher
+            # fails to lock, update() returns ERROR, and the FCI's 1 ms deadline is
+            # missed until the robot aborts with
+            #   libfranka: Move command aborted: motion aborted by reflex!
+            #   ["communication_constraints_violation"]
+            # i.e. enabling it STOPS THE ROBOT. Only turn it on with a controller
+            # manager running well below 1 kHz, and watch for "Failed to lock the
+            # realtime publisher" -- that message is the precursor to the abort.
+            # For a gravity-free torque signal prefer external_effort.launch.py,
+            # which runs in its own process and cannot miss the FCI deadline.
             Node(
                 package="controller_manager",
                 executable="spawner",
                 arguments=["franka_robot_state_broadcaster"],
                 output="screen",
-                condition=UnlessCondition(use_fake_hardware),
+                condition=IfCondition(
+                    AndSubstitution(
+                        use_franka_state_broadcaster, NotSubstitution(use_fake_hardware)
+                    )
+                ),
             ),
             Node(
                 package="controller_manager",
