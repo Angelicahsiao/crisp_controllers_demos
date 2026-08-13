@@ -282,6 +282,24 @@ services:
       com_port:=${GRIPPER_COM_PORT:-/dev/ttyUSB0}
       use_rviz:=True"
 
+  # One-shot: loosen the FR3 collision-behavior thresholds via FCI. Run AFTER
+  # launch_franka_gripper (or launch_franka) is up and connected:
+  #   docker compose run --rm set_collision_behavior
+  # Override the service name if your bringup advertises it elsewhere:
+  #   FRANKA_COLLISION_SERVICE=/your/set_full_collision_behavior docker compose run --rm set_collision_behavior
+  set_collision_behavior:
+    <<: *franka-overlay
+    image: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-robotiq-server9}
+    container_name: crisp_controllers_demos_set_collision_behavior
+    command: >
+      bash -lc "source /opt/ros/humble/setup.bash &&
+      cd ~/ros2_ws &&
+      source install/setup.bash &&
+      export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
+      RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
+      python3 src/crisp_controllers_demos/set_collision_behavior.py
+      --ros-args -p service_name:=${FRANKA_COLLISION_SERVICE:-/service_server/set_full_collision_behavior}"
+
   # Standalone Robotiq 2F-140 on its OWN controller_manager (server-9 stack).
   # Uses a thin layer over franka-overlay-server9 that adds robotiq_controllers
   # (missing from the preserved image). Test the gripper in isolation before
