@@ -20,30 +20,42 @@ class CollisionBehaviorSetter(Node):
         req = SetFullCollisionBehavior.Request()
         self.get_logger().info("Sending request.")
 
-        req.lower_torque_thresholds_nominal = [25.0, 25.0, 22.0, 20.0, 19.0, 17.0, 14.0]
-        req.upper_torque_thresholds_nominal = [35.0, 35.0, 32.0, 30.0, 29.0, 27.0, 24.0]
+        # Thresholds raised ~40% over the previous set to stop nuisance reflex
+        # aborts during teleop (jerky streamed deltas, gripper contact). Crossing
+        # a LOWER threshold only flags a contact; crossing an UPPER one aborts the
+        # motion, so the upper values are what actually keep the arm running.
+        #
+        # Joints 5-7 are rated to ~12 Nm (joints 1-4 to ~87 Nm), so the wrist
+        # entries below already sit above what those joints can produce and their
+        # reflexes effectively never trip -- the real tolerance gained here is on
+        # joints 1-4 and on the Cartesian force thresholds.
+        #
+        # A genuine collision still aborts. Do NOT raise these further without a
+        # caged cell: the arm's ability to stop on contact scales with them.
+        req.lower_torque_thresholds_nominal = [35.0, 35.0, 32.0, 30.0, 27.0, 24.0, 20.0]
+        req.upper_torque_thresholds_nominal = [50.0, 50.0, 45.0, 42.0, 38.0, 34.0, 28.0]
         req.lower_torque_thresholds_acceleration = [
-            25.0,
-            25.0,
-            22.0,
-            20.0,
-            19.0,
-            17.0,
-            14.0,
-        ]
-        req.upper_torque_thresholds_acceleration = [
             35.0,
             35.0,
             32.0,
             30.0,
-            29.0,
             27.0,
             24.0,
+            20.0,
         ]
-        req.lower_force_thresholds_nominal = [30.0, 30.0, 30.0, 25.0, 25.0, 25.0]
-        req.upper_force_thresholds_nominal = [40.0, 40.0, 40.0, 35.0, 35.0, 35.0]
-        req.lower_force_thresholds_acceleration = [30.0, 30.0, 30.0, 25.0, 25.0, 25.0]
-        req.upper_force_thresholds_acceleration = [40.0, 40.0, 40.0, 35.0, 35.0, 35.0]
+        req.upper_torque_thresholds_acceleration = [
+            50.0,
+            50.0,
+            45.0,
+            42.0,
+            38.0,
+            34.0,
+            28.0,
+        ]
+        req.lower_force_thresholds_nominal = [45.0, 45.0, 45.0, 35.0, 35.0, 35.0]
+        req.upper_force_thresholds_nominal = [60.0, 60.0, 60.0, 50.0, 50.0, 50.0]
+        req.lower_force_thresholds_acceleration = [45.0, 45.0, 45.0, 35.0, 35.0, 35.0]
+        req.upper_force_thresholds_acceleration = [60.0, 60.0, 60.0, 50.0, 50.0, 50.0]
 
         future = self.cli.call_async(req)
         rclpy.spin_until_future_complete(self, future)
