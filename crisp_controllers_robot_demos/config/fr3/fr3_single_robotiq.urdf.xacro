@@ -40,7 +40,10 @@
 
   <!-- Mounted on the flange (fr3_link8). Adjust the origin to match your
        coupling: the Franka Hand convention rotates the EE by -45 deg about Z,
-       and a coupling kit adds a Z offset. -->
+       and a coupling kit adds a Z offset.
+       This coupling needs a FURTHER -45 deg on top of that convention, so the
+       total yaw is -90 deg (-pi/2) about Z. Measured on the real gripper: with
+       only the -45 deg Franka convention the Robotiq sat 45 deg off. -->
   <!-- include_ros2_control="false": the Robotiq is VISUAL-only in the franka
        URDF (links/TF). Its control lives on a SEPARATE /robotiq
        controller_manager (robotiq_2f140_standalone.urdf.xacro), because
@@ -53,7 +56,7 @@
     use_fake_hardware="$(arg use_fake_hardware)"
     com_port="$(arg com_port)"
     include_ros2_control="false">
-    <origin xyz="0 0 0" rpy="0 0 ${-pi/4}"/>
+    <origin xyz="0 0 0" rpy="0 0 ${-pi/2}"/>
   </xacro:robotiq_gripper>
 
   <!-- Robotiq 2F-85 TCP: 0.1025 m along the approach axis (Z) from the gripper

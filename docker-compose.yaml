@@ -271,6 +271,13 @@ services:
       args:
         BASE_IMAGE: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-overlay-server9}
     container_name: crisp_controllers_demos_launch_franka_gripper
+    # Defaults below match the bring-up that was validated on the real FR3:
+    #   robot at 192.168.19.111, rviz OFF, franka_robot_state_broadcaster ON.
+    # rviz is off deliberately -- it shares the container with the 1 kHz realtime
+    # loop, and the state broadcaster leaves almost no headroom (see the notes on
+    # use_franka_state_broadcaster in franka.launch.py). Every value is still
+    # overridable from the environment, e.g. to fall back to a safe bring-up:
+    #   FRANKA_STATE_BROADCASTER=false docker compose up launch_franka_gripper
     command: >
       bash -lc "if [ '${FRANKA_FAKE_HARDWARE:-false}' != 'true' ]; then sudo chmod a+rw ${GRIPPER_COM_PORT:-/dev/ttyUSB0}; fi &&
       source /opt/ros/humble/setup.bash &&
@@ -282,11 +289,12 @@ services:
       ros2 launch crisp_controllers_robot_demos franka.launch.py
       arm_id:=fr3
       use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false}
-      robot_ip:=${ROBOT_IP:-172.16.0.2}
+      robot_ip:=${ROBOT_IP:-192.168.19.111}
       use_gripper:=true
       load_gripper:=false
       com_port:=${GRIPPER_COM_PORT:-/dev/ttyUSB0}
-      use_rviz:=True"
+      use_rviz:=${FRANKA_RVIZ:-false}
+      use_franka_state_broadcaster:=${FRANKA_STATE_BROADCASTER:-true}"
 
   # Standalone Robotiq 2F-140 on its OWN controller_manager (server-9 stack).
   # Uses a thin layer over franka-overlay-server9 that adds robotiq_controllers

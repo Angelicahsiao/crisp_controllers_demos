@@ -25,6 +25,29 @@
       joint_impedance_controller:
         type: crisp_controllers/CartesianController
 
+      # Franka's own state broadcaster. Publishes tau_ext_hat_filtered and the
+      # external wrench, computed ONBOARD by the FCI from its rigid-body model
+      # plus the configured end-effector load (Desk -> Settings -> End Effector,
+      # or the ~/set_load service). Unlike the raw `effort` state interface --
+      # which is tau_J and therefore carries the full arm+payload gravity -- this
+      # reads ~0 when nothing touches the robot, so it is the signal to use for
+      # force feedback. Topics: ~/external_joint_torques, ~/robot_state.
+      franka_robot_state_broadcaster:
+        type: franka_robot_state_broadcaster/FrankaRobotStateBroadcaster
+
+      # These two were declared only in left_/right_controllers.yaml, so on the
+      # single-arm setup the launch spawned them and they silently never loaded.
+      torque_feedback_controller:
+        type: crisp_controllers/TorqueFeedbackController
+
+      # NOTE: provided by franka_force_feedback_controllers
+      # (github.com/danielsanjosepro/franka_broadcasters), which Dockerfile.robots
+      # clones but docker/Dockerfile.franka_server9 does NOT -- so this loads on the
+      # preserved image and fails on the from-source rebuild. Prefer
+      # franka_robot_state_broadcaster above, which is in both.
+      external_torques_broadcaster:
+        type: franka_force_feedback_controllers/ExternalTorquesBroadcaster
+
       # Robotiq 2F-140 gripper (spawned only when use_gripper:=true)
       robotiq_gripper_controller:
         type: position_controllers/GripperActionController
@@ -62,6 +85,24 @@
   joint_state_broadcaster:
     ros__parameters:
       use_local_topics: False
+
+  # arm_id must match the xacro's arm_id (fr3) plus any arm_prefix, because the
+  # broadcaster reads the state interface named "<arm_id>/robot_state" that
+  # franka_hardware exports programmatically.
+  franka_robot_state_broadcaster:
+    ros__parameters:
+      arm_id: fr3
+
+  external_torques_broadcaster:
+    ros__parameters:
+      joints:
+        - fr3_joint1
+        - fr3_joint2
+        - fr3_joint3
+        - fr3_joint4
+        - fr3_joint5
+        - fr3_joint6
+        - fr3_joint7
 
   twist_broadcaster:
     ros__parameters:

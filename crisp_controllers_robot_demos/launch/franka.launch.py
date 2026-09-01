@@ -208,6 +208,7 @@ def generate_launch_description():
     start_robot_state_publisher = LaunchConfiguration(start_robot_state_publisher_name)
     use_gripper = LaunchConfiguration(use_gripper_parameter_name)
     com_port = LaunchConfiguration(com_port_parameter_name)
+    use_franka_state_broadcaster = LaunchConfiguration("use_franka_state_broadcaster")
 
     rviz_file = os.path.join(
         get_package_share_directory("franka_description"),
@@ -275,6 +276,19 @@ def generate_launch_description():
                 description="Serial device of the Robotiq USB-to-RS485 adapter.",
             ),
             DeclareLaunchArgument(
+                "use_franka_state_broadcaster",
+                default_value="false",
+                description="Spawn franka_robot_state_broadcaster (publishes "
+                "tau_ext_hat_filtered and the external wrench). OFF by default and NOT "
+                "recommended at 1 kHz: it publishes nine topics per cycle from the "
+                "realtime loop, leaving so little headroom that any burst of "
+                "non-realtime work (rviz, a teleop client attaching, an action-goal "
+                "callback) overruns the FCI's 1 ms deadline and aborts the robot with "
+                "communication_constraints_violation. It survived ~100 s idle without "
+                "rviz and still aborted on the first trajectory goal. Prefer "
+                "external_effort.launch.py, which runs out-of-process.",
+            ),
+            DeclareLaunchArgument(
                 arm_prefix_parameter_name,
                 default_value="",
                 description="The prefix of the arm.",
@@ -335,11 +349,50 @@ def generate_launch_description():
                 arguments=["pose_broadcaster"],
                 output="screen",
             ),
+            # external_torques_broadcaster is NOT spawned: its plugin lives in
+            # franka_force_feedback_controllers (danielsanjosepro/franka_broadcasters),
+            # which is absent from BOTH the preserved image and the from-source
+            # rebuild (confirmed via `ros2 control list_controller_types`), so
+            # spawning it only produced a FATAL on every startup.
+            #
+            # DANGER -- franka_robot_state_broadcaster is OFF BY DEFAULT.
+            # Its update() publishes NINE topics per cycle (one realtime publisher
+            # plus eight plain ->publish() calls) directly inside the 1 kHz RT loop.
+            # On this setup that overruns the control cycle: the realtime publisher
+            # fails to lock, update() returns ERROR, and the FCI's 1 ms deadline is
+            # missed until the robot aborts with
+            #   libfranka: Move command aborted: motion aborted by reflex!
+            #   ["communication_constraints_violation"]
+            # i.e. enabling it CAN STOP THE ROBOT. Watch for "Failed to lock the
+            # realtime publisher" -- that message is the precursor to the abort.
+            #
+            # Measured on this setup (fr3 5.8.0, CM at 1 kHz, FIFO prio 50):
+            #   use_rviz:=True  -> trylock failures within seconds, then abort
+            #   use_rviz:=false -> ~100 s clean while IDLE, then aborted anyway as
+            #                      soon as a client sent a joint-trajectory goal
+            # So rviz is NOT the deciding factor -- it was simply one source of extra
+            # load. The broadcaster leaves so little realtime headroom that ANY burst
+            # of non-realtime work (rviz, a teleop client attaching, an action-goal
+            # callback) is enough to miss the FCI deadline and stop the arm. An idle
+            # run proves nothing.
+            #
+            # Recommendation: do NOT enable this at 1 kHz. Use
+            # external_effort.launch.py, which computes tau_ext out-of-process and
+            # cannot miss the deadline. Enable this only if you have throttled the
+            # broadcaster's publishing or are running a controller manager well below
+            # 1 kHz -- and never on a robot doing real work without a soak test.
+            # For a gravity-free torque signal prefer external_effort.launch.py,
+            # which runs in its own process and cannot miss the FCI deadline.
             Node(
                 package="controller_manager",
                 executable="spawner",
-                arguments=["external_torques_broadcaster"],
+                arguments=["franka_robot_state_broadcaster"],
                 output="screen",
+                condition=IfCondition(
+                    AndSubstitution(
+                        use_franka_state_broadcaster, NotSubstitution(use_fake_hardware)
+                    )
+                ),
             ),
             Node(
                 package="controller_manager",
