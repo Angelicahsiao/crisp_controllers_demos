@@ -19,6 +19,11 @@
   <xacro:arg name="arm_prefix" default="" />
   <xacro:arg name="has_camera" default="false" />
 
+  <!-- true: franka_description >= 2.x (franka_robot takes robot_type); false:
+       0.4.0 / server-9 preserved image (franka_robot takes arm_id).
+       franka.launch.py sets this from the installed franka_description. -->
+  <xacro:arg name="franka_new_api" default="true" />
+
   <!-- Serial device of the Robotiq USB-to-RS485 adapter. -->
   <xacro:arg name="com_port" default="/dev/ttyUSB0" />
 

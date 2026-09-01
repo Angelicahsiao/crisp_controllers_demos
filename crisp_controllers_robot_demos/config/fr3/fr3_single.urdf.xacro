@@ -37,6 +37,13 @@
 
   <xacro:arg name="has_camera" default="false" />
 
+  <!-- true: franka_description >= 2.x, whose franka_robot macro takes
+       robot_type; false: franka_description 0.4.0 (the server-9 preserved
+       image), whose franka_robot macro takes arm_id. franka.launch.py sets
+       this from the installed franka_description; the default targets the
+       current from-apt 2.x stack for standalone xacro runs. -->
+  <xacro:arg name="franka_new_api" default="true" />
+
 <xacro:property name="arm_prefix_modified" value="${'' if xacro.arg('arm_prefix') == '' else xacro.arg('arm_prefix') + '_'}" />
 
   <!-- Use the macro to create a single arm -->
