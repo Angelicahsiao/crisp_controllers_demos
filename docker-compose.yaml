@@ -296,16 +296,19 @@ services:
       use_rviz:=${FRANKA_RVIZ:-false}
       use_franka_state_broadcaster:=${FRANKA_STATE_BROADCASTER:-true}"
 
-  # One-shot: loosen the FR3 collision-behavior thresholds via FCI. Run AFTER
-  # launch_franka_gripper (or launch_franka) is up and connected:
+  # One-shot: loosen the FR3 collision-behavior thresholds via FCI. Run AFTER a
+  # franka bring-up is up and connected:
   #   docker compose run --rm set_collision_behavior
-  # Runs the single, validated collision script from the ROS package
-  # (crisp_controllers_robot_demos/set_collision_behavior.py): it self-checks
-  # the thresholds, verifies the robot ACCEPTED the request (non-zero exit on
-  # rejection), and targets /service_server/set_full_collision_behavior.
+  # This is a Franka-arm operation -- it calls franka_msgs SetFullCollisionBehavior
+  # and is independent of the gripper. It therefore inherits the plain franka image
+  # (franka-overlay-server9) from *franka-overlay instead of pinning the Robotiq
+  # image, so it works the same with launch_franka (no gripper), the Franka Hand,
+  # or launch_franka_gripper (Robotiq). Runs the single, validated collision script
+  # from the ROS package (crisp_controllers_robot_demos/set_collision_behavior.py):
+  # it self-checks the thresholds, verifies the robot ACCEPTED the request (non-zero
+  # exit on rejection), and targets /service_server/set_full_collision_behavior.
   set_collision_behavior:
     <<: *franka-overlay
-    image: ${FRANKA_IMAGE:-crisp_controllers_demos:franka-robotiq-server9}
     container_name: crisp_controllers_demos_set_collision_behavior
     command: >
       bash -lc "source /opt/ros/humble/setup.bash &&
