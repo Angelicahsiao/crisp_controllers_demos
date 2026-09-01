@@ -19,24 +19,49 @@
              "
     >
   <xacro:property name="arm_prefix_modified" value="${'' if arm_prefix == '' else arm_prefix + '_'}" />
-  <xacro:franka_robot arm_id="${arm_id}"
-                      joint_limits="${xacro.load_yaml('$(find franka_description)/robots/fr3/joint_limits.yaml')}"
-                      inertials="${xacro.load_yaml('$(find franka_description)/robots/fr3/inertials.yaml')}"
-                      kinematics="${xacro.load_yaml('$(find franka_description)/robots/fr3/kinematics.yaml')}"
-                      dynamics="${xacro.load_yaml('$(find franka_description)/robots/fr3/dynamics.yaml')}"
-                      gazebo="${gazebo}"
-                      hand="${hand}"
-                      ee_id="${ee_id}"
-                      with_sc="${with_sc}"
-                      ros2_control="false"
-                      robot_ip="${robot_ip}"
-                      use_fake_hardware="${use_fake_hardware}"
-                      fake_sensor_commands="${fake_sensor_commands}"
-                      gazebo_effort="${gazebo_effort}"
-                      no_prefix="${no_prefix}"
-                      arm_prefix="${arm_prefix}"
-                      connected_to="${arm_prefix_modified}base">
-  </xacro:franka_robot>
+
+  <!-- franka_description renamed the franka_robot macro's first parameter
+       arm_id -> robot_type somewhere after 0.4.0, and moved the
+       joint_limits/inertials/kinematics/dynamics loads (plus the hardware
+       params) inside the macro. Support BOTH signatures so the same sources
+       work on the preserved server-9 image (franka_description 0.4.0, arm_id)
+       AND the current from-apt stack (franka_description 2.x, robot_type).
+       franka.launch.py inspects the installed franka_description and sets
+       franka_new_api accordingly; passing arm_id to the 2.x macro (or
+       robot_type to the 0.4.0 macro) fails with 'Invalid parameter ...'.
+       Either way robot_type/arm_id is "fr3", so the joints the macro emits
+       (fr3_joint1..7, fr3_link8) match our franka_arm_ros2_control block. -->
+  <xacro:if value="$(arg franka_new_api)">
+    <xacro:franka_robot robot_type="${arm_id}"
+                        gazebo="${gazebo}"
+                        hand="${hand}"
+                        ee_id="${ee_id}"
+                        with_sc="${with_sc}"
+                        no_prefix="${no_prefix}"
+                        arm_prefix="${arm_prefix}"
+                        connected_to="${arm_prefix_modified}base">
+    </xacro:franka_robot>
+  </xacro:if>
+  <xacro:unless value="$(arg franka_new_api)">
+    <xacro:franka_robot arm_id="${arm_id}"
+                        joint_limits="${xacro.load_yaml('$(find franka_description)/robots/fr3/joint_limits.yaml')}"
+                        inertials="${xacro.load_yaml('$(find franka_description)/robots/fr3/inertials.yaml')}"
+                        kinematics="${xacro.load_yaml('$(find franka_description)/robots/fr3/kinematics.yaml')}"
+                        dynamics="${xacro.load_yaml('$(find franka_description)/robots/fr3/dynamics.yaml')}"
+                        gazebo="${gazebo}"
+                        hand="${hand}"
+                        ee_id="${ee_id}"
+                        with_sc="${with_sc}"
+                        ros2_control="false"
+                        robot_ip="${robot_ip}"
+                        use_fake_hardware="${use_fake_hardware}"
+                        fake_sensor_commands="${fake_sensor_commands}"
+                        gazebo_effort="${gazebo_effort}"
+                        no_prefix="${no_prefix}"
+                        arm_prefix="${arm_prefix}"
+                        connected_to="${arm_prefix_modified}base">
+    </xacro:franka_robot>
+  </xacro:unless>
 
   <!-- We use our own ros2 control definition -->
   <xacro:franka_arm_ros2_control arm_id="fr3"

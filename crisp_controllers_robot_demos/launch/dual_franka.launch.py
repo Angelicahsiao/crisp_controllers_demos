@@ -16,6 +16,24 @@ from launch_ros.actions import Node, PushRosNamespace
 from launch_ros.substitutions import FindPackageShare
 
 
+def franka_uses_robot_type_api():
+    """True if the installed franka_description's franka_robot macro takes
+    robot_type (2.x) rather than arm_id (0.4.0 / server-9). See the identical
+    helper in franka.launch.py for the full rationale.
+    """
+    try:
+        franka_robot_xacro = os.path.join(
+            get_package_share_directory("franka_description"),
+            "robots",
+            "common",
+            "franka_robot.xacro",
+        )
+        with open(franka_robot_xacro) as f:
+            return "robot_type" in f.read()
+    except Exception:
+        return True
+
+
 def generate_launch_description():
     return LaunchDescription([OpaqueFunction(function=check_package_and_launch)])
 
@@ -55,9 +73,12 @@ def generate_launch_description():
         "fr3",
         "fr3_dual.urdf.xacro",
     )
-    robot_description = xacro.process_file(franka_xacro_filepath).toprettyxml(
-        indent="  "
-    )
+    robot_description = xacro.process_file(
+        franka_xacro_filepath,
+        mappings={
+            "franka_new_api": "true" if franka_uses_robot_type_api() else "false",
+        },
+    ).toprettyxml(indent="  ")
 
     left_ld = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([

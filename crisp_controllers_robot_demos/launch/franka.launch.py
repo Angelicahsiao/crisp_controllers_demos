@@ -36,6 +36,31 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+def franka_uses_robot_type_api():
+    """Return True when the installed franka_description exposes the newer
+    franka_robot signature (robot_type), False for the 0.4.0 one (arm_id).
+
+    franka_description renamed the franka_robot macro's first parameter from
+    arm_id (<= 0.4.0, matching the server-9 preserved image) to robot_type
+    (2.x, what the current apt/from-source stack ships). Calling the macro with
+    the wrong keyword aborts xacro with 'Invalid parameter arm_id' (or
+    'robot_type'), so pick the one the installed macro actually declares.
+    """
+    try:
+        franka_robot_xacro = os.path.join(
+            get_package_share_directory("franka_description"),
+            "robots",
+            "common",
+            "franka_robot.xacro",
+        )
+        with open(franka_robot_xacro) as f:
+            return "robot_type" in f.read()
+    except Exception:
+        # franka_description missing or restructured: assume the current 2.x
+        # API (the fr3 xacros also default franka_new_api to true).
+        return True
+
+
 def robot_description_dependent_nodes_spawner(
     context: LaunchContext,
     robot_ip,
@@ -67,16 +92,20 @@ def robot_description_dependent_nodes_spawner(
         "fr3",
         "fr3_single_robotiq.urdf.xacro" if use_gripper_bool else "fr3_single.urdf.xacro",
     )
-    # Only pass mappings the fr3 xacros actually declare as <xacro:arg>. Newer
-    # xacro rejects undeclared mappings ("Invalid parameter ..."); the fr3
-    # macro hardcodes arm_id/ros2_control and never reads mujoco_model, so
-    # those three (previously silently ignored) are dropped.
+    # Pass the args the fr3 xacros consume as $(arg ...). Unknown mapping keys
+    # are silently ignored by xacro (they only seed the $(arg) table), so extra
+    # keys never raise -- the earlier arm_id/ros2_control/mujoco_model were just
+    # dead (the fr3 macro hardcodes them), which is why they were dropped. The
+    # real 'Invalid parameter arm_id' failure comes from the franka_robot MACRO
+    # CALL below, when the installed franka_description no longer accepts arm_id;
+    # franka_new_api selects the matching signature.
     xacro_mappings = {
         "arm_prefix": arm_prefix_str,
         "robot_ip": robot_ip_str,
         "load_gripper": load_gripper_str,
         "use_fake_hardware": use_fake_hardware_str,
         "fake_sensor_commands": fake_sensor_commands_str,
+        "franka_new_api": "true" if franka_uses_robot_type_api() else "false",
     }
     if use_gripper_bool:
         xacro_mappings["com_port"] = com_port_str

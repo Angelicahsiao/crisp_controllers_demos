@@ -18,6 +18,11 @@
   <xacro:arg name="robot_ip_left" default="172.16.1.2" />
   <xacro:arg name="robot_ip_right" default="172.16.0.2" />
 
+  <!-- true: franka_description >= 2.x (franka_robot takes robot_type); false:
+       0.4.0 / server-9 preserved image (franka_robot takes arm_id).
+       dual_franka.launch.py sets this from the installed franka_description. -->
+  <xacro:arg name="franka_new_api" default="true" />
+
   <xacro:fr3
     arm_id="fr3"
     robot_ip="$(arg robot_ip_left)"
