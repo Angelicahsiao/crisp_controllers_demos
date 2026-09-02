@@ -243,6 +243,11 @@ services:
       ros2 run rmw_zenoh_cpp rmw_zenohd"
 
 
+  # Plain FR3 arm. The Franka Hand is loaded by default (load_gripper=true), which
+  # also starts crisp_py_franka_hand_adapter. For an arm with NO gripper, set
+  # FRANKA_LOAD_GRIPPER=false -- otherwise the hand adapter times out waiting for a
+  # gripper that is not there ("Gripper client is not ready after timeout"). For the
+  # Robotiq at the flange, use launch_franka_gripper instead.
   launch_franka:
     <<: *franka-overlay
     container_name: crisp_controllers_demos_launch_franka
@@ -254,7 +259,7 @@ services:
       export ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-enp0s31f6} &&
       RMW=${RMW:-cyclone} source src/crisp_controllers_demos/scripts/setup_middleware.sh &&
       ros2 launch crisp_controllers_robot_demos franka.launch.py
-      arm_id:=fr3 use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false} robot_ip:=${ROBOT_IP:-172.16.0.2} use_rviz:=True"
+      arm_id:=fr3 use_fake_hardware:=${FRANKA_FAKE_HARDWARE:-false} robot_ip:=${ROBOT_IP:-172.16.0.2} load_gripper:=${FRANKA_LOAD_GRIPPER:-true} use_rviz:=True"
 
   # Franka + Robotiq 2F-140 at the flange (replaces the Franka Hand). The
   # gripper needs the USB-to-RS485 device, exposed via the /dev mount.
